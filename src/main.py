@@ -307,13 +307,13 @@ def main():
         "--cost",
         type=int,
         default=None,
-        help=f"仕入原価（円）。デフォルト: ¥{config.DEFAULT_COST_JPY:,}",
+        help=f"仕入原価（円・0以上）。デフォルト: ¥{config.DEFAULT_COST_JPY:,}",
     )
     parser.add_argument(
         "--weight",
         type=int,
         default=None,
-        help=f"商品重量（グラム）。デフォルト: {config.DEFAULT_WEIGHT_G}g",
+        help=f"商品重量（グラム・1以上）。デフォルト: {config.DEFAULT_WEIGHT_G}g",
     )
     parser.add_argument(
         "--country",
@@ -324,6 +324,14 @@ def main():
     )
 
     args = parser.parse_args()
+
+    # 引数バリデーション
+    if args.cost is not None and args.cost < 0:
+        print("エラー: 仕入原価は0以上で指定してください。", file=sys.stderr)
+        sys.exit(1)
+    if args.weight is not None and args.weight < 1:
+        print("エラー: 商品重量は1g以上で指定してください。", file=sys.stderr)
+        sys.exit(1)
 
     try:
         run(

@@ -48,9 +48,29 @@ class TestExtractPartNumber:
         title = "Mazda Genuine Fuel Filter KL47-20-490A Japan OEM"
         assert extract_part_number(title) == "KL47-20-490A"
 
+    def test_nissan_door_panel(self):
+        """日産ドアパネル: H210A-4CAMA（英字始まり2セグメント）"""
+        title = "H210A4CAMA Genuine Nissan DOOR REAR LH H210A-4CAMA"
+        assert extract_part_number(title) == "H210A-4CAMA"
+
+    def test_nissan_grille(self):
+        """日産グリル: 62320AU300（ハイフンなし）"""
+        title = "Nissan Primera P12 Front Right Grille Grill 62320AU300"
+        assert extract_part_number(title) == "62320AU300"
+
     def test_no_part_number(self):
         """品番なしのタイトル"""
         title = "Car Parts Accessories Japan Import"
+        assert extract_part_number(title) is None
+
+    def test_no_part_number_jdm_only(self):
+        """車種コード(EG6)のみで品番なし → 除外される"""
+        title = "JDM Honda Civic EG6 Rear Wing Spoiler White Brake Light"
+        assert extract_part_number(title) is None
+
+    def test_no_part_number_supra(self):
+        """車種コード(JZA80,MK4)のみで品番なし → 除外される"""
+        title = "GENUINE TOYOTA SUPRA MK4 JZA80 2JZ-GTE TURBO ENGINE WIRING"
         assert extract_part_number(title) is None
 
     def test_empty_title(self):
