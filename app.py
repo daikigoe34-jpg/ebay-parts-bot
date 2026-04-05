@@ -12,6 +12,7 @@ import pandas as pd
 from src import config
 from src.ebay_client import search_items, get_demo_data, KEYWORD_INTERVAL
 from src.calculator import calculate_profit
+from src.part_number import get_source_info
 
 # ページ設定
 st.set_page_config(
@@ -113,8 +114,12 @@ if st.button("検索開始", type="primary", use_container_width=True):
                 weight_g=weight_g,
                 country=country,
             )
+            # 品番抽出・モノタロウURL生成
+            source = get_source_info(item["title"])
+
             results.append({
                 "商品名": item["title"][:50],
+                "品番": source["part_number"],
                 "販売価格(USD)": item["price_usd"],
                 "販売価格(JPY)": calc["sale_jpy"],
                 "eBay手数料(USD)": calc["ebay_fee_total_usd"],
@@ -125,6 +130,7 @@ if st.button("検索開始", type="primary", use_container_width=True):
                 "利益(JPY)": calc["profit_jpy"],
                 "利益率(%)": calc["profit_margin"],
                 "URL": item.get("url", ""),
+                "モノタロウ": source["monotaro_url"],
             })
 
         # ソート
@@ -151,10 +157,15 @@ if st.button("検索開始", type="primary", use_container_width=True):
         if len(profitable) > 0:
             top5 = profitable.head(5)
             for _, row in top5.iterrows():
+                mono_link = ""
+                if row.get("モノタロウ"):
+                    mono_link = f"  \n[モノタロウで確認]({row['モノタロウ']})"
+                part = f"（{row['品番']}）" if row.get("品番") else ""
                 st.markdown(
-                    f"**{row['商品名']}**  \n"
+                    f"**{row['商品名']}** {part}  \n"
                     f"販売 ${row['販売価格(USD)']:.2f} → "
                     f"利益 ¥{row['利益(JPY)']:,.0f}（利益率 {row['利益率(%)']:.1f}%）"
+                    f"{mono_link}"
                 )
         else:
             st.info("黒字商品がありません。仕入原価を下げるか、より高額な商品を狙ってみてください。")

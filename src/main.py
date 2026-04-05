@@ -15,6 +15,7 @@ from tabulate import tabulate
 from src import config
 from src.ebay_client import search_items, get_demo_data
 from src.calculator import calculate_profit
+from src.part_number import get_source_info
 from src.logger import logger
 
 
@@ -190,8 +191,12 @@ def run(demo_mode=False, dryrun_mode=False, cost_jpy=None, weight_g=None, countr
             country=country,
         )
 
+        # 品番抽出・モノタロウURL生成
+        source = get_source_info(item["title"])
+
         results.append({
             "商品名": item["title"][:50],
+            "品番": source["part_number"],
             "販売価格(USD)": f"${item['price_usd']:.2f}",
             "販売価格(JPY)": f"¥{calc['sale_jpy']:,}",
             "eBay手数料(USD)": f"${calc['ebay_fee_total_usd']:.2f}",
@@ -203,6 +208,7 @@ def run(demo_mode=False, dryrun_mode=False, cost_jpy=None, weight_g=None, countr
             "利益率(%)": calc["profit_margin"],
             "販売日": item["sold_date"],
             "URL": item["url"],
+            "モノタロウ": source["monotaro_url"],
             "_profit_margin_raw": calc["profit_margin"],
             "_profit_jpy_raw": calc["profit_jpy"],
         })
