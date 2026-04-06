@@ -13,9 +13,9 @@ import pandas as pd
 from tabulate import tabulate
 
 from src import config
-from src.ebay_client import search_items, get_demo_data
+from src.ebay_client import search_items, get_demo_data, get_item_description, KEYWORD_INTERVAL as _KW_INTERVAL
 from src.calculator import calculate_profit
-from src.part_number import get_source_info
+from src.part_number import get_source_info, extract_part_number
 from src.logger import logger
 
 
@@ -118,20 +118,40 @@ def run(demo_mode=False, dryrun_mode=False, cost_jpy=None, weight_g=None, countr
     else:
         print(f"\neBay Browse API から商品を検索します（${config.MIN_PRICE_USD:.0f}〜${config.MAX_PRICE_USD:.0f}）...\n")
         all_items = []
-        from src.ebay_client import KEYWORD_INTERVAL
         for i, keyword in enumerate(config.SEARCH_KEYWORDS, 1):
             logger.info(f"[{i}/{len(config.SEARCH_KEYWORDS)}] 検索中...")
             items = search_items(keyword)
             all_items.extend(items)
             # レート制限対策: キーワード間に待機を入れる
             if i < len(config.SEARCH_KEYWORDS):
-                time.sleep(KEYWORD_INTERVAL)
+                time.sleep(_KW_INTERVAL)
 
     if not all_items:
         print("\n商品が見つかりませんでした。")
         return
 
     print(f"\n合計 {len(all_items)}件 の商品を取得しました。")
+
+    # ------ 品番なし商品: 説明文から品番を補完 ------
+    if not demo_mode and not dryrun_mode:
+        no_pn_items = [item for item in all_items
+                       if item.get("item_id") and not extract_part_number(item["title"])]
+        if no_pn_items:
+            print(f"品番なし {len(no_pn_items)}件 → 商品説明から品番を検索中...")
+            found = 0
+            for i, item in enumerate(no_pn_items):
+                desc = get_item_description(item["item_id"])
+                if desc:
+                    pn = extract_part_number(desc)
+                    if pn:
+                        # タイトル末尾に品番を追記（抽出用）
+                        item["_desc_part_number"] = pn
+                        found += 1
+                # レート制限対策: 1秒間隔
+                if i < len(no_pn_items) - 1:
+                    time.sleep(1)
+            print(f"  → 説明文から {found}件 の品番を追加抽出\n")
+
     print("利益計算中...\n")
 
     # ------ dryrunモード: 1商品目の計算ステップを詳細表示 ------
@@ -191,8 +211,10 @@ def run(demo_mode=False, dryrun_mode=False, cost_jpy=None, weight_g=None, countr
             country=country,
         )
 
-        # 品番抽出・モノタロウURL生成
+        # 品番抽出・モノタロウURL生成（タイトル→説明文の順で試行）
         source = get_source_info(item["title"])
+        if not source["part_number"] and item.get("_desc_part_number"):
+            source = get_source_info(item["_desc_part_number"])
 
         results.append({
             "商品名": item["title"][:50],

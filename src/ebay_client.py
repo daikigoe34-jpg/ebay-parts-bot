@@ -252,6 +252,9 @@ def search_items(keyword):
             # 出品場所
             location = item.get("itemLocation", {}).get("country", "")
 
+            # itemIdを保持（個別API用）
+            item_id = item.get("itemId", "")
+
             items.append({
                 "title": title,
                 "price_usd": price_usd,
@@ -260,6 +263,7 @@ def search_items(keyword):
                 "url": url,
                 "keyword": keyword,
                 "location": location,
+                "item_id": item_id,
             })
         except (KeyError, ValueError, TypeError):
             skipped += 1
@@ -270,6 +274,53 @@ def search_items(keyword):
 
     logger.info(f"{len(items)}件 取得: 「{keyword}」")
     return items
+
+
+def get_item_description(item_id):
+    """
+    Browse API で商品の説明文を取得する（品番抽出用）
+
+    Args:
+        item_id (str): eBayのitemId（例: "v1|123456789|0"）
+
+    Returns:
+        str: 商品説明文（HTMLタグ除去済み）。取得失敗時は空文字
+    """
+    if not item_id:
+        return ""
+
+    try:
+        token = get_oauth_token()
+    except Exception:
+        return ""
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
+    }
+
+    url = f"https://api.ebay.com/buy/browse/v1/item/{item_id}"
+
+    try:
+        response = requests.get(url, headers=headers, timeout=API_TIMEOUT)
+    except RequestException:
+        return ""
+
+    if response.status_code != 200:
+        logger.debug(f"商品詳細取得失敗（status={response.status_code}）: {item_id}")
+        return ""
+
+    try:
+        data = response.json()
+        description = data.get("description", "")
+        # HTMLタグを簡易除去（品番抽出に必要な文字だけ残す）
+        import re
+        text = re.sub(r'<[^>]+>', ' ', description)
+        # 連続空白を1つに
+        text = re.sub(r'\s+', ' ', text).strip()
+        return text
+    except (ValueError, KeyError):
+        return ""
 
 
 def get_demo_data():

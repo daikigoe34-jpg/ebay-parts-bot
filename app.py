@@ -10,9 +10,9 @@ import streamlit as st
 import pandas as pd
 
 from src import config
-from src.ebay_client import search_items, get_demo_data, KEYWORD_INTERVAL
+from src.ebay_client import search_items, get_demo_data, get_item_description, KEYWORD_INTERVAL
 from src.calculator import calculate_profit
-from src.part_number import get_source_info
+from src.part_number import get_source_info, extract_part_number
 
 # ページ設定
 st.set_page_config(
@@ -105,6 +105,30 @@ if st.button("検索開始", type="primary", use_container_width=True):
     else:
         st.success(f"{len(all_items)}件の商品を取得しました。")
 
+        # 品番なし商品: 説明文から品番を補完（API本番のみ）
+        if mode != "デモデータ":
+            no_pn_items = [item for item in all_items
+                           if item.get("item_id") and not extract_part_number(item["title"])]
+            if no_pn_items:
+                desc_progress = st.progress(0, text="品番なし商品の説明文を確認中...")
+                found = 0
+                for i, item in enumerate(no_pn_items):
+                    desc_progress.progress(
+                        (i + 1) / len(no_pn_items),
+                        text=f"説明文から品番検索中... ({i+1}/{len(no_pn_items)})",
+                    )
+                    desc = get_item_description(item["item_id"])
+                    if desc:
+                        pn = extract_part_number(desc)
+                        if pn:
+                            item["_desc_part_number"] = pn
+                            found += 1
+                    if i < len(no_pn_items) - 1:
+                        time.sleep(1)
+                desc_progress.empty()
+                if found:
+                    st.info(f"説明文から {found}件 の品番を追加抽出しました。")
+
         # 利益計算
         results = []
         for item in all_items:
@@ -114,8 +138,10 @@ if st.button("検索開始", type="primary", use_container_width=True):
                 weight_g=weight_g,
                 country=country,
             )
-            # 品番抽出・モノタロウURL生成
+            # 品番抽出・モノタロウURL生成（タイトル→説明文の順で試行）
             source = get_source_info(item["title"])
+            if not source["part_number"] and item.get("_desc_part_number"):
+                source = get_source_info(item["_desc_part_number"])
 
             results.append({
                 "商品名": item["title"][:50],
