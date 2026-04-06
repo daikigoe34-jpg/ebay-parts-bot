@@ -239,7 +239,6 @@ DEFAULT_WEIGHT_G = 500
 # ==============================
 # eBay API 設定
 # ==============================
-EBAY_FINDING_API_URL = "https://svcs.ebay.com/services/search/FindingService/v1"
 EBAY_BROWSE_API_URL = "https://api.ebay.com/buy/browse/v1/item_summary/search"
 EBAY_OAUTH_URL = "https://api.ebay.com/identity/v1/oauth2/token"
 
