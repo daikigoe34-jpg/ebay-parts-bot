@@ -13,7 +13,11 @@ from scripts.core import (
     market_score,
     tariff_scenario,
 )
-from scripts.research import aggregate_sales_estimate
+from scripts.research import (
+    EbayMarketplaceInsightsClient,
+    aggregate_sales_estimate,
+    summarize_marketplace_insights,
+)
 
 
 def test_extract_toyota_and_honda_numbers():
@@ -314,3 +318,108 @@ def test_query_rotation_advances_without_random_repeats():
     assert len(second) == 2
     assert {query for query, _ in first}.isdisjoint({query for query, _ in second})
     assert state["query_cursor"] == 0
+
+
+def test_marketplace_insights_aggregates_exact_90d_sales_and_prices():
+    rows = [
+        {
+            "itemId": "sold-1",
+            "title": "Nissan Genuine Switch 25550-5SA0A",
+            "totalSoldQuantity": 4,
+            "lastSoldPrice": {"value": "82.50", "currency": "USD"},
+            "lastSoldDate": "2026-08-10T00:00:00.000Z",
+            "seller": {"username": "seller-a"},
+        },
+        {
+            "itemId": "sold-2",
+            "title": "OEM 255505SA0A Nissan switch",
+            "totalSoldQuantity": "3",
+            "lastSoldPrice": {"value": "90", "currency": "USD"},
+            "seller": {"username": "seller-b"},
+        },
+        # Duplicate item IDs must not be double-counted. Keep the larger quantity.
+        {
+            "itemId": "sold-2",
+            "title": "OEM 25550-5SA0A Nissan switch",
+            "totalSoldQuantity": 2,
+            "lastSoldPrice": {"value": "88", "currency": "USD"},
+        },
+        {
+            "itemId": "noise",
+            "title": "Nissan generic switch",
+            "totalSoldQuantity": 100,
+            "lastSoldPrice": {"value": "10", "currency": "USD"},
+        },
+    ]
+    result = summarize_marketplace_insights("25550-5SA0A", rows, search_total=4)
+    assert result["usable"] is True
+    assert result["quality"] == "marketplace_insights_90d"
+    assert result["confidence"] == "confirmed"
+    assert result["estimate"] == 7
+    assert result["low"] == 7
+    assert result["high"] == 7
+    assert result["exact_match_count"] == 2
+    assert result["prices_usd"] == [82.5, 90.0]
+    assert result["seller_count"] == 2
+
+
+def test_marketplace_insights_successful_zero_is_confirmed_zero():
+    result = summarize_marketplace_insights("25550-5SA0A", [], search_total=0)
+    assert result["usable"] is True
+    assert result["confidence"] == "confirmed"
+    assert result["estimate"] == 0
+
+
+def test_marketplace_insights_no_exact_title_match_falls_back():
+    result = summarize_marketplace_insights(
+        "25550-5SA0A",
+        [{"itemId": "noise", "title": "Nissan generic switch", "totalSoldQuantity": 50}],
+        search_total=1,
+    )
+    assert result["usable"] is False
+    assert result["quality"] == "marketplace_insights_no_exact_match"
+
+
+def test_tariff_scenario_is_explicitly_screening_only():
+    scenario = tariff_scenario("JP")
+    assert scenario["rate"] == 0.15
+    assert scenario["screening_only"] is True
+    assert scenario["is_exact"] is False
+    assert scenario["requires_htsus"] is True
+    assert scenario["requires_ddp_quote"] is True
+    assert scenario["de_minimis_exemption_assumed"] is False
+
+
+def test_marketplace_insights_access_denial_disables_further_calls():
+    class Response:
+        status_code = 403
+        text = "restricted API"
+
+        @staticmethod
+        def json():
+            return {}
+
+    class Session:
+        def __init__(self):
+            self.calls = 0
+
+        def get(self, *args, **kwargs):
+            self.calls += 1
+            return Response()
+
+    class Browse:
+        def __init__(self):
+            self.session = Session()
+            self.token = "token"
+            self.marketplace = "EBAY_US"
+
+    browse = Browse()
+    client = EbayMarketplaceInsightsClient(browse)
+    first = client.search_part("25550-5SA0A", datetime(2026, 8, 15, tzinfo=timezone.utc))
+    second = client.search_part("90915-YZZF2", datetime(2026, 8, 15, tzinfo=timezone.utc))
+
+    assert first["available"] is False
+    assert first["status"] == "not_approved"
+    assert second["status"] == "not_approved"
+    assert browse.session.calls == 1
+    assert client.summary()["fallback_method"] == "daily_snapshot_delta"

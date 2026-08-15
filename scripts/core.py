@@ -190,47 +190,65 @@ def extract_country_of_origin(item: Mapping[str, Any]) -> tuple[str, str]:
 
 
 def tariff_scenario(origin_code: str) -> dict[str, Any]:
-    """Conservative screening scenario, not an HTSUS determination.
+    """Return a conservative customs screening scenario, never a legal duty rate.
 
-    Japan-origin auto parts are screened at a 15% total duty baseline. Unknown or
-    other origins are screened at 25% and require HTS/origin confirmation before a
-    final buy decision. US-origin goods are screened at 0% but still require proof.
+    The exact US duty can change with HTSUS classification, country of origin,
+    Section 232 scope, temporary measures, and the carrier's DDP calculation.
+    The displayed rate only prevents the tool from overstating profit before
+    those facts are confirmed.
     """
     origin = normalize_country(origin_code)
+    common = {
+        "screening_only": True,
+        "is_exact": False,
+        "confirmation_required": True,
+        "requires_htsus": True,
+        "requires_origin_proof": True,
+        "requires_ddp_quote": True,
+        "de_minimis_exemption_assumed": False,
+        "last_verified": "2026-08-15",
+    }
     if origin == "JP":
         return {
+            **common,
             "rate": 0.15,
             "low_rate": 0.15,
             "high_rate": 0.25,
-            "basis": "japan_auto_parts_15pct_baseline",
+            "basis": "japan_origin_auto_parts_screening_baseline",
             "confidence": "medium",
-            "confirmation_required": True,
+            "policy_note": (
+                "Japan-origin automotive-parts screening baseline. Exact duty depends on HTSUS, "
+                "current Section 232 scope, and any other measures in force on the import date."
+            ),
         }
     if origin == "US":
         return {
+            **common,
             "rate": 0.0,
             "low_rate": 0.0,
             "high_rate": 0.15,
-            "basis": "us_origin_return_assumption",
+            "basis": "us_origin_return_screening",
             "confidence": "low",
-            "confirmation_required": True,
+            "policy_note": "US-origin return screening only; origin proof and other fees still require confirmation.",
         }
     if origin:
         return {
+            **common,
             "rate": 0.25,
             "low_rate": 0.15,
             "high_rate": 0.50,
-            "basis": "non_japan_auto_parts_conservative",
+            "basis": "non_japan_origin_conservative_screening",
             "confidence": "low",
-            "confirmation_required": True,
+            "policy_note": "Conservative placeholder until HTSUS and country of origin are confirmed.",
         }
     return {
+        **common,
         "rate": 0.25,
         "low_rate": 0.15,
         "high_rate": 0.50,
-        "basis": "unknown_origin_conservative",
+        "basis": "unknown_origin_conservative_screening",
         "confidence": "unknown",
-        "confirmation_required": True,
+        "policy_note": "Unknown-origin placeholder; never use this as the final legal duty rate.",
     }
 
 

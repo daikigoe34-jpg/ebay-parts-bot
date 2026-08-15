@@ -322,3 +322,12 @@ console.log("web core tests: passed");
   assert.equal(result.insertionFeeJpy, 30);
   assert.ok(result.ebayFeeTaxJpy >= 3);
 }
+
+{
+  const official = {
+    sales_quality: "marketplace_insights_90d",
+    sales_confidence: "confirmed",
+    sales_auto_verified: false,
+  };
+  assert.equal(app.isSalesAutoVerified(official), true);
+}
