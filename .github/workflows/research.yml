@@ -1,0 +1,86 @@
+name: eBay自動リサーチ
+
+on:
+  workflow_dispatch:
+    inputs:
+      query:
+        description: "任意の検索語。空欄ならメーカー・純正・小型部品をランダム選択"
+        required: false
+        type: string
+  schedule:
+    # 毎日 06:17 JST（UTC 21:17）。GitHub側の都合で遅れる場合があります。
+    - cron: "17 21 * * *"
+
+concurrency:
+  group: ebay-parts-research
+  cancel-in-progress: false
+
+jobs:
+  research:
+    name: 調査・検証・結果保存
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      EBAY_CLIENT_ID: ${{ secrets.EBAY_CLIENT_ID }}
+      EBAY_CLIENT_SECRET: ${{ secrets.EBAY_CLIENT_SECRET }}
+      EBAY_MARKETPLACE: EBAY_US
+      EBAY_CATEGORY_ID: "6028"
+      RESEARCH_QUERY: ${{ github.event_name == 'workflow_dispatch' && inputs.query || '' }}
+      MAX_DISCOVERY_ITEMS: "50"
+      MAX_CANDIDATES: "15"
+      MAX_EXACT_DETAILS: "15"
+    steps:
+      - name: リポジトリを取得
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Pythonを準備
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: 依存関係をインストール
+        run: python -m pip install -r requirements.txt
+
+      - name: Python自動テスト
+        run: python -m pytest -q
+
+      - name: JavaScript自動テスト
+        run: node tests/web_core.test.cjs
+
+      - name: JavaScript構文検証
+        run: node --check web/app.js
+
+      - name: eBayを調査
+        run: python scripts/research.py
+
+      - name: 出力JSONを検証
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("web/data/results.json")
+          data = json.loads(path.read_text(encoding="utf-8"))
+          assert data.get("schema_version") == 2
+          assert isinstance(data.get("products"), list)
+          assert data.get("generated_at")
+          print(f"validated: {len(data['products'])} products")
+          PY
+
+      - name: 調査結果をmainへ保存
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add web/data/results.json state/snapshots.json
+          if git diff --cached --quiet; then
+            echo "保存対象の差分はありません。"
+            exit 0
+          fi
+          git commit -m "data: eBay調査結果を更新"
+          git push origin "HEAD:${{ github.event.repository.default_branch }}"

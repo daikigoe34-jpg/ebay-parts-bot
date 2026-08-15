@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#111827">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Part Scout">
+  <title>Part Scout Mobile</title>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="apple-touch-icon" href="./icons/icon-512.png">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <header class="app-header">
+    <div>
+      <p class="eyebrow">EBAY MOTORS RESEARCH</p>
+      <h1>Part Scout Mobile</h1>
+      <p id="run-status" class="muted">データを読み込んでいます…</p>
+    </div>
+    <div class="header-actions">
+      <a class="run-button" href="https://github.com/daikigoe34-jpg/ebay-parts-bot/actions/workflows/research.yml" target="_blank" rel="noopener noreferrer">今すぐ調査</a>
+      <button id="refresh-button" class="icon-button" type="button" aria-label="再読み込み">↻</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="summary-grid" aria-label="集計">
+      <article class="summary-card">
+        <span>候補</span>
+        <strong id="summary-count">–</strong>
+      </article>
+      <article class="summary-card">
+        <span>注目</span>
+        <strong id="summary-promising">–</strong>
+      </article>
+      <article class="summary-card">
+        <span>検索語</span>
+        <strong id="summary-query" class="small-strong">–</strong>
+      </article>
+    </section>
+
+    <nav class="tabs" aria-label="画面切替">
+      <button class="tab is-active" data-tab="results" type="button">候補一覧</button>
+      <button class="tab" data-tab="import" type="button">90日補正</button>
+      <button class="tab" data-tab="settings" type="button">利益設定</button>
+    </nav>
+
+    <section id="tab-results" class="tab-panel is-active">
+      <div class="toolbar">
+        <label class="search-box">
+          <span class="sr-only">候補を検索</span>
+          <input id="filter-input" type="search" placeholder="品番・メーカーで絞る" autocomplete="off">
+        </label>
+        <select id="sort-select" aria-label="並び替え">
+          <option value="score">市場スコア順</option>
+          <option value="sold">90日販売数順</option>
+          <option value="competition">競合が少ない順</option>
+          <option value="price">相場が高い順</option>
+          <option value="profit">利益順</option>
+        </select>
+      </div>
+
+      <div class="notice" id="data-quality-notice"></div>
+      <div id="product-list" class="product-list" aria-live="polite"></div>
+      <p id="empty-state" class="empty-state" hidden>該当する候補がありません。</p>
+    </section>
+
+    <section id="tab-import" class="tab-panel">
+      <form id="manual-research-form" class="panel-card manual-research-form">
+        <h2>Product Researchの実績で補正</h2>
+        <p>eBayアプリ等で品番を90日指定して確認し、4項目を入力します。通常APIの推定値より優先され、入力内容はこのiPhone内だけに保存されます。</p>
+        <label>品番<input name="partNumber" type="text" required autocomplete="off" placeholder="25550-5SA0A"></label>
+        <label>過去90日販売数<input name="sold90d" type="number" min="0" step="1" required></label>
+        <label>現在の競合出品数<input name="activeCompetition" type="number" min="0" step="1" required></label>
+        <label>成約価格の中央値／平均（USD）<input name="medianPriceUsd" type="number" min="0" step="0.01" required></label>
+        <label>販売セラー数（任意）<input name="sellerCount" type="number" min="0" step="1"></label>
+        <label>商品名（任意）<input name="title" type="text" autocomplete="off"></label>
+        <button class="primary-button" type="submit">実績データを保存</button>
+        <p id="manual-status" class="muted"></p>
+      </form>
+
+      <article class="panel-card">
+        <h2>CSVをまとめて取り込む</h2>
+        <p>同梱テンプレートと同じ列構成のCSVを選ぶと、過去90日分を品番単位で集計します。eBay公式画面にCSV出力がない場合は、テンプレートへ転記してください。</p>
+        <label class="primary-button file-button">
+          CSVを選択
+          <input id="csv-input" type="file" accept=".csv,text/csv,text/tab-separated-values" hidden>
+        </label>
+        <p id="csv-status" class="muted">CSVはGitHubへ送信されません。</p>
+        <button id="clear-csv-button" class="secondary-button" type="button">補正データを全削除</button>
+      </article>
+
+      <article class="panel-card">
+        <h2>CSVで認識する主な列</h2>
+        <p>商品名、販売価格、販売日、数量、セラー、競合数、Manufacturer Part Number／MPN。品番列がない場合は商品名から抽出します。</p>
+      </article>
+    </section>
+
+    <section id="tab-settings" class="tab-panel">
+      <form id="settings-form" class="settings-grid">
+        <article class="panel-card">
+          <h2>売上・手数料</h2>
+          <label>1ドルの円換算<input name="exchangeRate" type="number" min="1" step="0.01"></label>
+          <label>eBay手数料・下段（%）<input name="ebayFeeRate" type="number" min="0" step="0.01"></label>
+          <label>下段の上限（USD）<input name="ebayFeeThresholdUsd" type="number" min="0" step="1"></label>
+          <label>上限超過分（%）<input name="ebayFeeAboveRate" type="number" min="0" step="0.01"></label>
+          <label>海外決済手数料（%）<input name="internationalFeeRate" type="number" min="0" step="0.01"></label>
+          <label>1取引固定手数料・10USD超（USD）<input name="perOrderFeeUsd" type="number" min="0" step="0.01"></label>
+          <label>米国売上税の仮定（%）<input name="buyerSalesTaxRate" type="number" min="0" step="0.01"></label>
+          <label>広告率（%）<input name="promotedRate" type="number" min="0" step="0.01"></label>
+          <label>為替・出金ロス（%）<input name="fxSpreadRate" type="number" min="0" step="0.01"></label>
+          <div class="preset-row">
+            <button type="button" class="chip fee-preset" data-rate="13.6" data-threshold="7500">ストアなし 13.6%</button>
+            <button type="button" class="chip fee-preset" data-rate="11.5" data-threshold="1000">Basic以上 11.5%</button>
+          </div>
+          <p class="muted">固定手数料は総売上10USD以下なら自動で0.30USD、超える場合は上の設定値を使います。</p>
+        </article>
+
+        <article class="panel-card">
+          <h2>関税・リスク</h2>
+          <label>関税率（%）<input name="tariffRate" type="number" min="0" step="0.01"></label>
+          <div class="preset-row">
+            <button type="button" class="chip tariff-preset" data-rate="15">日本原産の基準 15%（仮）</button>
+            <button type="button" class="chip tariff-preset" data-rate="0">実見積を固定費へ入力</button>
+          </div>
+          <label>返品・不良引当（%）<input name="returnReserveRate" type="number" min="0" step="0.01"></label>
+          <p class="muted">15%は仮置きです。材質・HTSUS・原産国で変わります。SpeedPAK等のDDP実見積を得たら、税率または通関固定費へ反映してください。</p>
+        </article>
+
+        <article class="panel-card">
+          <h2>販売判定ライン</h2>
+          <label>最低利益（円）<input name="minimumProfitJpy" type="number" min="0" step="100"></label>
+          <label>最低利益率（%）<input name="minimumMarginRate" type="number" min="0" step="0.1"></label>
+          <label>最低90日販売数<input name="minimumSold90d" type="number" min="0" step="1"></label>
+          <label>最低市場スコア<input name="minimumMarketScore" type="number" min="0" max="100" step="1"></label>
+          <label>最低「販売÷競合」<input name="minimumDemandRatio" type="number" min="0" step="0.01"></label>
+          <button class="primary-button" type="submit">設定を保存</button>
+          <button id="reset-settings-button" class="secondary-button" type="button">初期値へ戻す</button>
+        </article>
+      </form>
+    </section>
+  </main>
+
+  <footer>
+    <button id="export-button" class="secondary-button" type="button">現在の一覧をCSV保存</button>
+    <p>iPhone: Safariの共有ボタン →「ホーム画面に追加」</p>
+  </footer>
+
+  <template id="product-card-template">
+    <article class="product-card">
+      <div class="card-topline">
+        <div>
+          <span class="brand-label"></span>
+          <h2 class="part-number"></h2>
+        </div>
+        <span class="judgment-badge"></span>
+      </div>
+
+      <p class="product-title"></p>
+
+      <div class="metric-grid">
+        <div><span>推定90日販売</span><strong class="sold-value"></strong></div>
+        <div><span>競合出品</span><strong class="competition-value"></strong></div>
+        <div><span>相場中央値</span><strong class="price-value"></strong></div>
+        <div><span>市場スコア</span><strong class="score-value"></strong></div>
+      </div>
+
+      <div class="source-row">
+        <span class="quality-label"></span>
+        <span class="demand-ratio"></span>
+      </div>
+      <div class="market-detail-row">
+        <span class="price-band"></span>
+        <span class="sample-detail"></span>
+      </div>
+
+      <div class="link-row">
+        <a class="store-link monotaro-link" target="_blank" rel="noopener noreferrer">モノタロウ</a>
+        <a class="store-link rakuten-link" target="_blank" rel="noopener noreferrer">楽天</a>
+        <a class="store-link ebay-link" target="_blank" rel="noopener noreferrer">eBay</a>
+      </div>
+
+      <details class="profit-details">
+        <summary>仕入価格・送料を入れて利益判定</summary>
+        <div class="profit-form">
+          <label>販売価格（USD）<input data-cost="salePriceUsd" type="number" min="0" step="0.01"></label>
+          <label>購入者負担送料（USD）<input data-cost="buyerShippingUsd" type="number" min="0" step="0.01"></label>
+          <label>仕入価格（円）<input data-cost="procurementJpy" type="number" min="0" step="1"></label>
+          <label>国内送料（円）<input data-cost="domesticShippingJpy" type="number" min="0" step="1"></label>
+          <label>国際送料・SpeedPAK（円）<input data-cost="internationalShippingJpy" type="number" min="0" step="1"></label>
+          <label>梱包費（円）<input data-cost="packagingJpy" type="number" min="0" step="1"></label>
+          <label>通関・DDP追加費（円）<input data-cost="customsFixedJpy" type="number" min="0" step="1"></label>
+          <label class="check-row"><input data-cost="tariffConfirmed" type="checkbox">DDP関税を実見積で確認済み</label>
+        </div>
+        <p class="profit-note">「販売候補」になるには、Product Researchの90日実績とDDP関税実見積の両方が必要です。API推定だけの場合は「仮候補」です。</p>
+        <div class="profit-result">
+          <div><span>予想利益</span><strong class="profit-value"></strong></div>
+          <div><span>利益率</span><strong class="margin-value"></strong></div>
+          <div><span>関税見込</span><strong class="tariff-value"></strong></div>
+          <div><span>総コスト</span><strong class="cost-value"></strong></div>
+        </div>
+        <p class="profit-judgment"></p>
+      </details>
+    </article>
+  </template>
+
+  <script src="./app-01.js" defer></script>
+  <script src="./app-02.js" defer></script>
+  <script src="./app-03.js" defer></script>
+</body>
+</html>

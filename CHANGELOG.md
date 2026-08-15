@@ -1,31 +1,25 @@
-# CHANGELOG
+# Changelog
 
-## 2026-04-06 (2)
+## 0.2.0 - 2026-08-15
 
-- 品番自動抽出機能追加（正規表現で主要5メーカー+汎用パターン対応）
-- モノタロウ検索URL自動生成（スクレイピングなし・リンク生成のみ）
-- 品番抽出パターン拡充: 英字始まりハイフンなし型（N02668670A00等）追加
-- CLIバリデーション追加: --cost 0未満、--weight 0以下を拒否
-- 車種コード誤検出防止（EG6, JZA80, MK4等を除外リストに追加）
-- Streamlit Web UI追加（iPhone対応・Streamlit Cloud デプロイ対応）
-- Streamlit Secrets対応（.envなしでもAPIキーを読み込み可能）
-- テスト56件（品番抽出18件追加）
+- eBayのキーワード検索総数を、そのまま同一品番の競合数にしないよう修正
+- 同一品番一致率から競合数を推定し、競合精度とサンプルカバー率を表示
+- Browse API由来の90日販売数を「確認した出品サンプルの仮推定」と明確化
+- Product Research実績とDDP関税実見積が未確認なら「仮候補」とする安全判定を追加
+- eBay手数料の段階料率と、10USD以下0.30USD／超過0.40USDの固定手数料を実装
+- iPhone画面からGitHub Actionsの手動調査画面を1タップで開く導線を追加
+- 関税プリセットの誤解を招く12.5%表示を削除し、実見積確認方式へ変更
+- CSV出力へ競合精度・DDP関税確認状態を追加
+- Pythonテストを追加し、競合推定と段階手数料を検証
 
-## 2026-04-06
+## 0.1.0 - 2026-08-15
 
-- Finding API → Browse API に切り替え（Finding APIがレート制限で使用不可のため）
-- OAuth 2.0 Client Credentials Grant によるトークン取得・キャッシュ機能追加
-- 価格フィルタ追加（$10〜$800）: 非現実的な高額商品を除外
-- レート制限対策: キーワード間2秒間隔 + 指数バックオフリトライ（最大3回）
-- Finding APIレート制限チェックスクリプト追加（scripts/check_finding_api.py）
-- テスト追加: 価格フィルタ範囲、Browse API URL存在チェック（計38テスト）
-
-## 2026-04-05
-
-- 初版リリース
-- eBay Browse API による日本車純正部品検索
-- SpeedPAK Economy送料テーブル（US/US_REMOTE/UK/DE/AU）
-- FVF + International Fee + Payoneer FX + DDP関税の正確な利益計算
-- CLI（--demo, --dryrun, --cost, --weight, --country）
-- CSV出力（BOM付きUTF-8）+ コンソール表示
-- 38件のユニットテスト
+- iPhone向けPWAを作成
+- eBay Browse APIのランダム自動調査を追加
+- OEM品番抽出と同一品番の競合・相場集計を追加
+- 日次スナップショットによる90日販売数推定を追加
+- Product Research手入力補正とCSV補正を追加
+- モノタロウ・楽天・eBayの1タップ検索を追加
+- 手数料・関税・送料・返品引当を含む利益判定を追加
+- GitHub Actionsによる毎日実行とGitHub Pages公開を追加
+- Python／JavaScript自動テストを追加
