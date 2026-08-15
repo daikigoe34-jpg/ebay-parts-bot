@@ -14,9 +14,11 @@ from scripts.core import (
     tariff_scenario,
 )
 from scripts.research import (
-    EbayMarketplaceInsightsClient,
+    ApiCallBudget,
+    EbayApiError,
     aggregate_sales_estimate,
-    summarize_marketplace_insights,
+    build_candidate,
+    classify_setup_error,
 )
 
 
@@ -320,64 +322,43 @@ def test_query_rotation_advances_without_random_repeats():
     assert state["query_cursor"] == 0
 
 
-def test_marketplace_insights_aggregates_exact_90d_sales_and_prices():
-    rows = [
-        {
-            "itemId": "sold-1",
-            "title": "Nissan Genuine Switch 25550-5SA0A",
-            "totalSoldQuantity": 4,
-            "lastSoldPrice": {"value": "82.50", "currency": "USD"},
-            "lastSoldDate": "2026-08-10T00:00:00.000Z",
-            "seller": {"username": "seller-a"},
-        },
-        {
-            "itemId": "sold-2",
-            "title": "OEM 255505SA0A Nissan switch",
-            "totalSoldQuantity": "3",
-            "lastSoldPrice": {"value": "90", "currency": "USD"},
-            "seller": {"username": "seller-b"},
-        },
-        # Duplicate item IDs must not be double-counted. Keep the larger quantity.
-        {
-            "itemId": "sold-2",
-            "title": "OEM 25550-5SA0A Nissan switch",
-            "totalSoldQuantity": 2,
-            "lastSoldPrice": {"value": "88", "currency": "USD"},
-        },
-        {
-            "itemId": "noise",
-            "title": "Nissan generic switch",
-            "totalSoldQuantity": 100,
-            "lastSoldPrice": {"value": "10", "currency": "USD"},
-        },
-    ]
-    result = summarize_marketplace_insights("25550-5SA0A", rows, search_total=4)
-    assert result["usable"] is True
-    assert result["quality"] == "marketplace_insights_90d"
-    assert result["confidence"] == "confirmed"
-    assert result["estimate"] == 7
-    assert result["low"] == 7
-    assert result["high"] == 7
-    assert result["exact_match_count"] == 2
-    assert result["prices_usd"] == [82.5, 90.0]
-    assert result["seller_count"] == 2
-
-
-def test_marketplace_insights_successful_zero_is_confirmed_zero():
-    result = summarize_marketplace_insights("25550-5SA0A", [], search_total=0)
-    assert result["usable"] is True
-    assert result["confidence"] == "confirmed"
+def test_learning_mode_never_uses_pre_observation_lifetime_sales():
+    now = datetime(2026, 8, 15, tzinfo=timezone.utc)
+    part = "25550-5SA0A"
+    item = {
+        "itemId": "newly-observed",
+        "estimatedAvailabilities": [{"estimatedSoldQuantity": 250}],
+    }
+    result = aggregate_sales_estimate(part, [item], {}, now)
+    assert result["confidence"] == "learning"
+    assert result["quality"] == "tracking_not_ready"
     assert result["estimate"] == 0
+    assert result["low"] == 0
+    assert result["high"] == 0
+    assert result["lifetime_sold_reference"] == 250
+    assert result["auto_verified"] is False
 
 
-def test_marketplace_insights_no_exact_title_match_falls_back():
-    result = summarize_marketplace_insights(
-        "25550-5SA0A",
-        [{"itemId": "noise", "title": "Nissan generic switch", "totalSoldQuantity": 50}],
-        search_total=1,
-    )
-    assert result["usable"] is False
-    assert result["quality"] == "marketplace_insights_no_exact_match"
+def test_api_call_budget_stops_before_exceeding_limit():
+    budget = ApiCallBudget(limit=2)
+    budget.consume("oauth")
+    budget.consume("browse")
+    assert budget.used == 2
+    assert budget.remaining == 0
+    try:
+        budget.consume("another call")
+    except EbayApiError as exc:
+        assert exc.phase == "budget"
+        assert exc.status_code == 429
+    else:
+        raise AssertionError("budget must raise before the third call")
+
+
+def test_setup_error_distinguishes_bad_key_from_browse_permission():
+    auth_status = classify_setup_error(EbayApiError("bad key", status_code=401, phase="oauth"))
+    browse_status = classify_setup_error(EbayApiError("forbidden", status_code=403, phase="browse"))
+    assert auth_status[0] == "auth_failed"
+    assert browse_status[0] == "browse_access_denied"
 
 
 def test_tariff_scenario_is_explicitly_screening_only():
@@ -390,36 +371,76 @@ def test_tariff_scenario_is_explicitly_screening_only():
     assert scenario["de_minimis_exemption_assumed"] is False
 
 
-def test_marketplace_insights_access_denial_disables_further_calls():
-    class Response:
-        status_code = 403
-        text = "restricted API"
+def test_previous_candidate_survives_when_all_current_listings_end():
+    now = datetime(2026, 8, 15, tzinfo=timezone.utc)
+    part = "25550-5SA0A"
+    snapshots = {
+        "ended-item": [
+            {
+                "item_id": "ended-item",
+                "part_numbers": [part],
+                "observed_at": (now - timedelta(days=30)).isoformat(),
+                "sold_quantity": 1,
+            },
+            {
+                "item_id": "ended-item",
+                "part_numbers": [part],
+                "observed_at": (now - timedelta(days=5)).isoformat(),
+                "sold_quantity": 3,
+            },
+        ]
+    }
+    candidate = build_candidate(
+        part_number=part,
+        items=[],
+        competition={
+            "active_count": 0,
+            "known": True,
+            "confidence": "high",
+            "match_rate": 1.0,
+            "search_total": 0,
+            "search_returned": 0,
+            "search_matched": 0,
+        },
+        prices=[],
+        snapshots=snapshots,
+        observed_at=now,
+        queries=[part],
+        rakuten=None,
+        previous={
+            "part_number": part,
+            "title": "Nissan genuine switch 25550-5SA0A",
+            "brand": "Nissan",
+            "price_median_usd": 80,
+            "price_p25_usd": 75,
+            "price_p75_usd": 90,
+            "country_of_origin": "JP",
+            "origin_confidence": "high",
+        },
+        default_shipping_jpy=2800,
+    )
+    assert candidate["price_median_usd"] == 80
+    assert candidate["active_competition"] == 0
+    assert candidate["sales_observed_delta"] == 2
+    assert candidate["sold_90d_est"] == 7.2
+    assert candidate["country_of_origin"] == "JP"
+    assert candidate["price_source"] == "previous_browse_listing"
 
-        @staticmethod
-        def json():
-            return {}
 
-    class Session:
-        def __init__(self):
-            self.calls = 0
+def test_missing_secrets_writes_setup_status_without_touching_results(tmp_path, monkeypatch):
+    import json
+    import scripts.research as research
 
-        def get(self, *args, **kwargs):
-            self.calls += 1
-            return Response()
+    setup_path = tmp_path / "setup_status.json"
+    result_path = tmp_path / "results.json"
+    result_path.write_text('{"sentinel": true}', encoding="utf-8")
+    monkeypatch.setattr(research, "SETUP_STATUS_PATH", setup_path)
+    monkeypatch.setattr(research, "RESULTS_PATH", result_path)
+    monkeypatch.delenv("EBAY_CLIENT_ID", raising=False)
+    monkeypatch.delenv("EBAY_CLIENT_SECRET", raising=False)
 
-    class Browse:
-        def __init__(self):
-            self.session = Session()
-            self.token = "token"
-            self.marketplace = "EBAY_US"
-
-    browse = Browse()
-    client = EbayMarketplaceInsightsClient(browse)
-    first = client.search_part("25550-5SA0A", datetime(2026, 8, 15, tzinfo=timezone.utc))
-    second = client.search_part("90915-YZZF2", datetime(2026, 8, 15, tzinfo=timezone.utc))
-
-    assert first["available"] is False
-    assert first["status"] == "not_approved"
-    assert second["status"] == "not_approved"
-    assert browse.session.calls == 1
-    assert client.summary()["fallback_method"] == "daily_snapshot_delta"
+    assert research.run() == 0
+    setup = json.loads(setup_path.read_text(encoding="utf-8"))
+    assert setup["status"] == "missing_secrets"
+    assert setup["ready"] is False
+    assert result_path.read_text(encoding="utf-8") == '{"sentinel": true}'

@@ -1,16 +1,14 @@
 "use strict";
 
-const CACHE_NAME = "part-scout-shell-v6";
-const RESULTS_CACHE_URL = new URL("./data/results.json", self.location.href).href;
+const CACHE_NAME = "part-scout-shell-v7";
+const DATA_URLS = ["./data/results.json", "./data/setup_status.json"];
 const SHELL = [
   "./",
   "./index.html",
   "./styles.css",
-  "./app-01.js",
-  "./app-02.js",
-  "./app-03.js",
+  "./app.js",
   "./manifest.webmanifest",
-  "./icons/icon-512.png"
+  "./icons/icon-512.png",
 ];
 
 self.addEventListener("install", (event) => {
@@ -28,19 +26,20 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
-
   const url = new URL(event.request.url);
-  if (url.pathname.endsWith("/data/results.json")) {
+  const isData = DATA_URLS.some((path) => url.pathname.endsWith(path.replace(".", "")));
+
+  if (isData) {
     event.respondWith(
       fetch(event.request, { cache: "no-store" })
         .then(async (response) => {
           if (response.ok) {
             const cache = await caches.open(CACHE_NAME);
-            await cache.put(RESULTS_CACHE_URL, response.clone());
+            await cache.put(event.request, response.clone());
           }
           return response;
         })
-        .catch(() => caches.match(RESULTS_CACHE_URL))
+        .catch(() => caches.match(event.request))
     );
     return;
   }

@@ -15,7 +15,7 @@
 <body>
   <header class="app-header">
     <div>
-      <p class="eyebrow">EBAY MOTORS AUTO RESEARCH</p>
+      <p class="eyebrow">EBAY MOTORS / PRODUCTION API</p>
       <h1>Part Scout</h1>
       <p id="run-status" class="header-status">データを読み込んでいます…</p>
     </div>
@@ -26,19 +26,39 @@
   </header>
 
   <main>
+    <section id="setup-panel" class="setup-panel setup-warn" aria-label="初回設定と接続状態">
+      <div class="setup-heading-row">
+        <div>
+          <span class="step-kicker">PRODUCTION KEY EDITION</span>
+          <h2 id="setup-title">最初にProduction APIを接続します</h2>
+        </div>
+        <span id="setup-badge" class="health-badge badge-warn">確認中</span>
+      </div>
+      <p id="setup-message" class="setup-message">接続状態を読み込んでいます。</p>
+      <ol class="setup-steps">
+        <li><span>1</span><div><strong>Productionキーを登録</strong><small>App IDとCert IDをGitHub Secretsへ</small></div><em id="setup-key-state" class="step-state state-pending">未確認</em></li>
+        <li><span>2</span><div><strong>OAuth・Browseを自動診断</strong><small>キーとProduction利用権限を分けて判定</small></div><em id="setup-browse-state" class="step-state state-pending">未確認</em></li>
+        <li><span>3</span><div><strong>iPhoneへ追加</strong><small>GitHub PagesをSafariのホーム画面へ</small></div><em id="setup-pages-state" class="step-state state-info">画面表示で完了</em></li>
+      </ol>
+      <div class="setup-actions">
+        <a id="setup-primary" class="primary-button" target="_blank" rel="noopener noreferrer">次へ</a>
+        <a id="setup-secondary" class="secondary-button" target="_blank" rel="noopener noreferrer">実行状況</a>
+      </div>
+    </section>
+
     <section id="automation-panel" class="automation-panel" aria-label="自動化状況">
       <div class="automation-title-row">
         <div>
           <span class="step-kicker">毎日ほぼ自動</span>
-          <h2>上から順に見るだけです</h2>
+          <h2>黄色の指示だけ処理します</h2>
         </div>
         <span id="automation-health" class="health-badge">確認中</span>
       </div>
       <ol class="flow-list">
         <li><span class="flow-number">1</span><div><strong>eBayを自動巡回</strong><small id="flow-research">実行状況を確認中</small></div></li>
-        <li><span class="flow-number">2</span><div><strong>品番・販売ペース・競合を自動集計</strong><small id="flow-market">集計中</small></div></li>
-        <li><span class="flow-number">3</span><div><strong>楽天価格を自動取得</strong><small id="flow-procurement">設定状況を確認中</small></div></li>
-        <li><span class="flow-number">4</span><div><strong>利益順に並べて次の操作を表示</strong><small>黄色の「次にすること」だけ処理してください</small></div></li>
+        <li><span class="flow-number">2</span><div><strong>販売増分・競合・相場を自動集計</strong><small id="flow-market">集計中</small></div></li>
+        <li><span class="flow-number">3</span><div><strong>国内仕入価格を探索</strong><small id="flow-procurement">設定状況を確認中</small></div></li>
+        <li><span class="flow-number">4</span><div><strong>利益順に並べて次の操作を表示</strong><small>人が確認するのは最終候補だけです</small></div></li>
       </ol>
     </section>
 
@@ -52,7 +72,7 @@
     <nav class="tabs" aria-label="操作手順">
       <button class="tab is-active" data-tab="today" type="button"><span>1</span>今日やる</button>
       <button class="tab" data-tab="all" type="button"><span>2</span>全候補</button>
-      <button class="tab" data-tab="accuracy" type="button"><span>3</span>精度補正</button>
+      <button class="tab" data-tab="observation" type="button"><span>3</span>観測状況</button>
       <button class="tab" data-tab="settings" type="button"><span>4</span>設定</button>
     </nav>
 
@@ -64,7 +84,7 @@
       </article>
       <div class="notice" id="data-quality-notice"></div>
       <div id="top-product-list" class="product-list" aria-live="polite"></div>
-      <p id="top-empty-state" class="empty-state" hidden>今日処理する候補はありません。自動調査の更新を確認してください。</p>
+      <p id="top-empty-state" class="empty-state" hidden>今日は人が処理する候補がありません。自動観測は継続しています。</p>
     </section>
 
     <section id="tab-all" class="tab-panel">
@@ -76,7 +96,7 @@
         <select id="sort-select" aria-label="並び替え">
           <option value="profit">予想利益順</option>
           <option value="score">市場スコア順</option>
-          <option value="sold">販売ペース順</option>
+          <option value="sold">販売下限順</option>
           <option value="competition">競合が少ない順</option>
           <option value="price">相場が高い順</option>
         </select>
@@ -85,38 +105,19 @@
       <p id="empty-state" class="empty-state" hidden>該当する候補がありません。</p>
     </section>
 
-    <section id="tab-accuracy" class="tab-panel">
+    <section id="tab-observation" class="tab-panel">
       <article class="panel-card emphasis-card">
-        <h2>通常は入力不要です</h2>
-        <p>毎日の差分が30日分たまると、Product Researchを入力しなくても「自動精度・高」になります。今すぐ精度を上げたい品番だけ、下のCSVまたは手入力で上書きします。</p>
+        <h2>入力作業はありません</h2>
+        <p id="observation-summary">初回調査後、品番ごとの観測状況を表示します。</p>
+        <p class="muted">初回は累計販売数を基準値として保存するだけです。翌日以降の正の増分だけを販売として数え、7日未満は仕入判定に使いません。</p>
       </article>
-
-      <details class="panel-card optional-panel">
-        <summary>Product ResearchのCSVを取り込む</summary>
-        <p>CSVを選ぶと、販売数・競合・価格を品番単位でまとめて補正します。データはこのiPhone内にだけ保存されます。</p>
-        <label class="primary-button file-button">CSVを選択<input id="csv-input" type="file" accept=".csv,text/csv,text/tab-separated-values" hidden></label>
-        <p id="csv-status" class="muted">未取込</p>
-        <button id="clear-csv-button" class="secondary-button" type="button">補正データを全削除</button>
-      </details>
-
-      <details class="panel-card optional-panel">
-        <summary>上位1品番だけ手入力する</summary>
-        <form id="manual-research-form" class="manual-research-form">
-          <label>品番<input name="partNumber" type="text" required autocomplete="off" placeholder="25550-5SA0A"></label>
-          <label>過去90日販売数<input name="sold90d" type="number" min="0" step="1" required></label>
-          <label>現在の競合出品数<input name="activeCompetition" type="number" min="0" step="1" required></label>
-          <label>成約価格（USD）<input name="medianPriceUsd" type="number" min="0" step="0.01" required></label>
-          <label>販売セラー数（任意）<input name="sellerCount" type="number" min="0" step="1"></label>
-          <button class="primary-button" type="submit">この品番だけ保存</button>
-          <p id="manual-status" class="muted"></p>
-        </form>
-      </details>
+      <div id="observation-list" class="observation-list" aria-live="polite"></div>
     </section>
 
     <section id="tab-settings" class="tab-panel">
       <form id="settings-form" class="settings-grid">
         <article class="panel-card">
-          <h2>通常設定</h2>
+          <h2>eBay設定</h2>
           <label>eBayストア
             <select name="sellerPlan">
               <option value="no_store_or_starter">ストアなし／Starter</option>
@@ -124,44 +125,45 @@
             </select>
           </label>
           <label>前々月のeBay売上（USD）<input name="monthlySalesUsd" type="number" min="0" step="100"></label>
-          <p class="muted">海外決済手数料のボリューム割引を自動計算します。</p>
+          <p class="muted">海外決済手数料の売上割引を自動計算します。</p>
           <label class="check-row simple-check"><input name="autoExchangeRate" type="checkbox">為替を毎日自動更新</label>
           <label>手動為替（1 USD＝円）<input name="exchangeRate" type="number" min="1" step="0.01"></label>
           <label>米国売上税の仮定（%）<input name="buyerSalesTaxRate" type="number" min="0" step="0.01"></label>
           <label>出品手数料／1件（USD）<input name="insertionFeeUsd" type="number" min="0" step="0.01"></label>
-          <p class="muted">無料出品枠内なら0のままです。枠超過時だけ実額へ変更してください。</p>
+          <p class="muted">無料出品枠内なら0のままです。</p>
         </article>
 
         <article class="panel-card">
           <h2>Payoneer・リスク</h2>
           <label>Payoneer出金率（%）<input name="payoneerWithdrawalRate" type="number" min="0" max="10" step="0.1"></label>
-          <p class="muted">初期値3%。実アカウント表示が分かれば、その数値へ1回だけ変更してください。</p>
+          <p class="muted">初期値3%。ご自身のPayoneer画面の実料率へ1回だけ合わせます。</p>
           <label>Payoneer固定費／1件（円）<input name="payoneerFixedJpy" type="number" min="0" step="1"></label>
           <label class="check-row simple-check"><input name="includePayoneerAnnualFee" type="checkbox">年間アカウント手数料を自動配賦</label>
           <label>年間手数料の手動配賦（円・0で自動）<input name="payoneerAnnualAllocationJpy" type="number" min="0" step="1"></label>
-          <p class="muted">直近12か月の受取が6,000USD未満の場合を自動判定し、29.95USDを推定取引数で配賦します。初年度等で対象外ならチェックを外してください。</p>
           <label>広告率（%）<input name="promotedRate" type="number" min="0" step="0.1"></label>
           <label>返品・不良引当（%）<input name="returnReserveRate" type="number" min="0" step="0.1"></label>
           <label>追加落札手数料（%）<input name="additionalFvfRate" type="number" min="0" step="0.1"></label>
         </article>
 
         <article class="panel-card">
-          <h2>自動概算</h2>
+          <h2>判定基準</h2>
           <label>小型部品の国際送料（円）<input name="defaultInternationalShippingJpy" type="number" min="0" step="100"></label>
           <label>梱包費（円）<input name="defaultPackagingJpy" type="number" min="0" step="10"></label>
+          <label>国内送料の初期値（円）<input name="defaultDomesticShippingJpy" type="number" min="0" step="100"></label>
           <label>最低利益（円）<input name="minimumProfitJpy" type="number" min="0" step="100"></label>
           <label>最低利益率（%）<input name="minimumMarginRate" type="number" min="0" step="0.1"></label>
-          <label>最低90日販売ペース<input name="minimumSold90d" type="number" min="0" step="1"></label>
+          <label>最低90日販売下限<input name="minimumSold90d" type="number" min="0" step="1"></label>
           <label>最低市場スコア<input name="minimumMarketScore" type="number" min="0" max="100" step="1"></label>
+          <label>最低「販売÷競合」<input name="minimumDemandRatio" type="number" min="0" step="0.01"></label>
           <button class="primary-button" type="submit">設定を保存</button>
           <button id="reset-settings-button" class="secondary-button" type="button">推奨値へ戻す</button>
         </article>
       </form>
 
       <article class="panel-card fee-note-card">
-        <h2>計算に自動で含めるもの</h2>
-        <p>eBay落札手数料、取引固定料、海外決済手数料、日本の消費税10%、Payoneer出金費、関税の仮置き、広告、返品引当、仕入、国内送料、国際送料、梱包費です。</p>
-        <p class="muted">関税は確定税率ではありません。最終候補だけHTSUS・原産国・DDP見積を確認すると「購入候補」へ進みます。</p>
+        <h2>利益計算に含めるもの</h2>
+        <p>eBay落札手数料、注文固定料、海外決済手数料、日本の消費税、Payoneer出金費、関税の一次概算、広告、返品引当、仕入、国内送料、国際送料、梱包費です。</p>
+        <p class="muted">関税は確定税率ではありません。最終候補だけHTSUS・原産国・DDP実見積を確認すると「購入候補」へ進みます。</p>
       </article>
     </section>
   </main>
@@ -170,6 +172,14 @@
     <button id="export-button" class="secondary-button" type="button">現在の一覧をCSV保存</button>
     <p>iPhone: Safariの共有ボタン →「ホーム画面に追加」</p>
   </footer>
+
+  <template id="observation-card-template">
+    <article class="observation-card">
+      <div class="observation-heading"><strong class="observation-part"></strong><span class="observation-confidence"></span></div>
+      <div class="observation-progress"><span class="observation-progress-bar"></span></div>
+      <div class="observation-meta"><span class="observation-days"></span><small class="observation-detail"></small></div>
+    </article>
+  </template>
 
   <template id="product-card-template">
     <article class="product-card">
@@ -181,9 +191,9 @@
       <p class="product-title"></p>
 
       <div class="metric-grid">
-        <div><span>90日換算ペース</span><strong class="sold-value"></strong></div>
+        <div><span>90日販売下限</span><strong class="sold-value"></strong></div>
         <div><span>競合</span><strong class="competition-value"></strong></div>
-        <div><span>eBay相場</span><strong class="price-value"></strong></div>
+        <div><span>eBay出品相場</span><strong class="price-value"></strong></div>
         <div><span>予想利益</span><strong class="profit-value-main"></strong></div>
       </div>
 
@@ -194,7 +204,7 @@
       <p class="range-note"></p>
 
       <section class="auto-cost-box">
-        <div class="auto-cost-heading"><strong>自動入力された概算</strong><span class="auto-tag">自動</span></div>
+        <div class="auto-cost-heading"><strong>自動入力された一次概算</strong><span class="auto-tag">自動</span></div>
         <div class="auto-cost-grid">
           <div><span>仕入</span><strong class="procurement-value"></strong></div>
           <div><span>国際送料</span><strong class="shipping-value"></strong></div>
@@ -256,8 +266,6 @@
     </article>
   </template>
 
-  <script src="./app-01.js" defer></script>
-  <script src="./app-02.js" defer></script>
-  <script src="./app-03.js" defer></script>
+  <script src="./app.js" defer></script>
 </body>
 </html>

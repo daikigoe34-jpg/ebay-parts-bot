@@ -1,6 +1,6 @@
 {
-  "schema_version": 3,
-  "app_version": "0.3.1",
+  "schema_version": 4,
+  "app_version": "0.4.0",
   "generated_at": "2026-08-15T02:20:00Z",
   "marketplace": "EBAY_US",
   "category_id": "6028",
@@ -19,22 +19,21 @@
     "watchlist_size": 24,
     "snapshot_runs": 37,
     "rakuten_enabled": true,
-    "product_research_required_for_auto_verified": false,
     "high_confidence_after_days": 30,
-    "marketplace_insights": {
-      "enabled": true,
-      "attempted": false,
-      "available": false,
-      "status": "not_attempted",
-      "reason": "",
-      "official_90d_queries": 0,
-      "snapshot_fallback_queries": 0,
-      "fallback_method": "daily_snapshot_delta"
-    },
     "sales_source_priority": [
-      "marketplace_insights_90d",
       "daily_snapshot_delta"
-    ]
+    ],
+    "production_api": {
+      "status": "demo_not_connected",
+      "oauth": "not_checked",
+      "browse": "not_checked",
+      "marketplace": "EBAY_US",
+      "calls_used": 0,
+      "call_budget": 3500,
+      "calls_remaining": 3500,
+      "safe_budget_exhausted": false
+    },
+    "manual_sales_entry_required": false
   },
   "cost_defaults": {
     "exchange_rate": {
@@ -58,7 +57,7 @@
     "default_international_shipping_jpy": 2800,
     "default_packaging_jpy": 150
   },
-  "method_note": "Marketplace Insightsの利用承認がある場合はeBay公式の過去90日成約数・最終成約価格を自動使用します。未承認の場合は操作不要で日次スナップショット差分へ切り替えます。関税率はHTSUS・原産国・DDP確認前のスクリーニング仮置きです。",
+  "method_note": "Production Browse APIのestimatedSoldQuantityを毎日保存し、観測開始後の正の増分だけで90日販売ペースを推定します。7日未満は判定0、購入判定は保守的な信頼区間下限を使用します。販売数の手入力は不要です。",
   "products": [
     {
       "part_number": "25550-5SA0A",
@@ -77,7 +76,7 @@
       "sales_quality": "observed_delta_30d",
       "sales_confidence": "high",
       "sales_observed_days": 37,
-      "sales_scope": "tracked_listing_90d_run_rate",
+      "sales_scope": "browse_estimated_sold_quantity_daily_delta",
       "sales_auto_verified": true,
       "sales_confirmation_required": false,
       "sampled_listings": 18,
@@ -90,13 +89,13 @@
       "competition_search_matched": 14,
       "sample_coverage": 1.0,
       "sampled_sellers": 8,
-      "demand_ratio": 0.857,
+      "demand_ratio": 0.357,
       "price_median_usd": 129.0,
       "price_p25_usd": 115.0,
       "price_p75_usd": 142.0,
       "market_score": 82,
       "market_judgment": "有望",
-      "source": "demo_v0.3",
+      "source": "demo_production_browse_daily_delta",
       "country_of_origin": "JP",
       "origin_confidence": "high",
       "tariff": {
@@ -146,15 +145,8 @@
       "sales_short_history_listings": 0,
       "category_id": "33579",
       "category_path": "eBay Motors > Parts & Accessories > Car & Truck Parts & Accessories > Interior Parts & Accessories > Switches & Controls",
-      "marketplace_insights": {
-        "available": false,
-        "status": "not_attempted",
-        "used": false,
-        "search_total": 0,
-        "search_returned": 0,
-        "exact_match_count": 0,
-        "last_sold_date": ""
-      }
+      "sold_90d_decision": 5.0,
+      "sales_lifetime_reference": 0
     },
     {
       "part_number": "84912-FJ000",
@@ -173,7 +165,7 @@
       "sales_quality": "observed_delta",
       "sales_confidence": "medium",
       "sales_observed_days": 18,
-      "sales_scope": "tracked_listing_90d_run_rate",
+      "sales_scope": "browse_estimated_sold_quantity_daily_delta",
       "sales_auto_verified": false,
       "sales_confirmation_required": true,
       "sampled_listings": 9,
@@ -186,13 +178,13 @@
       "competition_search_matched": 11,
       "sample_coverage": 0.818,
       "sampled_sellers": 5,
-      "demand_ratio": 0.764,
+      "demand_ratio": 0.191,
       "price_median_usd": 78.0,
       "price_p25_usd": 65.0,
       "price_p75_usd": 90.0,
       "market_score": 70,
       "market_judgment": "候補",
-      "source": "demo_v0.3",
+      "source": "demo_production_browse_daily_delta",
       "country_of_origin": "",
       "origin_confidence": "unknown",
       "tariff": {
@@ -233,15 +225,8 @@
       "sales_short_history_listings": 0,
       "category_id": "33579",
       "category_path": "eBay Motors > Parts & Accessories > Car & Truck Parts & Accessories > Interior Parts & Accessories > Switches & Controls",
-      "marketplace_insights": {
-        "available": false,
-        "status": "not_attempted",
-        "used": false,
-        "search_total": 0,
-        "search_returned": 0,
-        "exact_match_count": 0,
-        "last_sold_date": ""
-      }
+      "sold_90d_decision": 2.1,
+      "sales_lifetime_reference": 0
     },
     {
       "part_number": "72155-S5A-A01",
@@ -254,13 +239,13 @@
         "72155-S5A-A01"
       ],
       "query": "Honda Factory Original actuator",
-      "sold_90d_est": 5.0,
+      "sold_90d_est": 0.0,
       "sold_90d_low": 0.0,
-      "sold_90d_high": 13.0,
-      "sales_quality": "listing_lifetime_under_90d",
+      "sold_90d_high": 0.0,
+      "sales_quality": "tracking_not_ready",
       "sales_confidence": "learning",
       "sales_observed_days": 4,
-      "sales_scope": "tracked_listing_90d_run_rate",
+      "sales_scope": "browse_estimated_sold_quantity_daily_delta",
       "sales_auto_verified": false,
       "sales_confirmation_required": true,
       "sampled_listings": 7,
@@ -273,13 +258,13 @@
       "competition_search_matched": 26,
       "sample_coverage": 0.269,
       "sampled_sellers": 9,
-      "demand_ratio": 0.192,
+      "demand_ratio": 0.0,
       "price_median_usd": 69.0,
       "price_p25_usd": 59.0,
       "price_p75_usd": 79.0,
       "market_score": 51,
       "market_judgment": "学習中",
-      "source": "demo_v0.3",
+      "source": "demo_production_browse_daily_delta",
       "country_of_origin": "JP",
       "origin_confidence": "medium",
       "tariff": {
@@ -329,15 +314,8 @@
       "sales_short_history_listings": 7,
       "category_id": "33579",
       "category_path": "eBay Motors > Parts & Accessories > Car & Truck Parts & Accessories > Interior Parts & Accessories > Switches & Controls",
-      "marketplace_insights": {
-        "available": false,
-        "status": "not_attempted",
-        "used": false,
-        "search_total": 0,
-        "search_returned": 0,
-        "exact_match_count": 0,
-        "last_sold_date": ""
-      }
+      "sold_90d_decision": 0.0,
+      "sales_lifetime_reference": 0
     },
     {
       "part_number": "90980-12345",
@@ -356,7 +334,7 @@
       "sales_quality": "observed_delta",
       "sales_confidence": "low",
       "sales_observed_days": 9,
-      "sales_scope": "tracked_listing_90d_run_rate",
+      "sales_scope": "browse_estimated_sold_quantity_daily_delta",
       "sales_auto_verified": false,
       "sales_confirmation_required": true,
       "sampled_listings": 5,
@@ -369,13 +347,13 @@
       "competition_search_matched": 21,
       "sample_coverage": 0.104,
       "sampled_sellers": 12,
-      "demand_ratio": 0.025,
+      "demand_ratio": 0.0,
       "price_median_usd": 22.0,
       "price_p25_usd": 18.0,
       "price_p75_usd": 27.0,
       "market_score": 28,
       "market_judgment": "学習中",
-      "source": "demo_v0.3",
+      "source": "demo_production_browse_daily_delta",
       "country_of_origin": "CN",
       "origin_confidence": "low",
       "tariff": {
@@ -416,15 +394,9 @@
       "sales_short_history_listings": 0,
       "category_id": "33579",
       "category_path": "eBay Motors > Parts & Accessories > Car & Truck Parts & Accessories > Interior Parts & Accessories > Switches & Controls",
-      "marketplace_insights": {
-        "available": false,
-        "status": "not_attempted",
-        "used": false,
-        "search_total": 0,
-        "search_returned": 0,
-        "exact_match_count": 0,
-        "last_sold_date": ""
-      }
+      "sold_90d_decision": 0.0,
+      "sales_lifetime_reference": 0
     }
-  ]
+  ],
+  "demo_data": true
 }

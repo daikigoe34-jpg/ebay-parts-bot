@@ -1,0 +1,31 @@
+Part Scout Mobile v0.4.0 validation
+Date: 2026-08-15
+
+Validated:
+- Production Browse API-only architecture
+- Restricted API dependencies removed
+- Python tests: 26 passed
+- JavaScript core tests: passed
+- Python and JavaScript syntax: passed
+- JSON and GitHub Actions YAML: passed
+- Missing secrets preserve existing results and write setup status
+- OAuth failure and Browse access denial produce different next actions
+- API call budget stops before exceeding the configured per-run limit
+- Pre-observation lifetime sold quantity is never used for purchase scoring
+- Observation periods shorter than seven days are not extrapolated
+- Ended listings retain previously observed positive sales deltas
+- Purchase gates use the conservative sales lower bound
+- Manual sales CSV/entry workflow removed from the daily UI
+- iPhone 390 x 844: no horizontal overflow
+- Four-step tab flow, settings persistence and observation rendering: passed
+- Browser JavaScript errors: none
+
+External verification still required after the owner registers Production secrets:
+- Actual eBay OAuth response
+- Actual Browse API Production access
+- Actual item data and daily snapshot persistence
+- GitHub Pages first enablement
+- Account-specific Payoneer fees
+- Product-specific HTSUS, origin, shipping and DDP duty
+
+No API secrets are included in the package.
