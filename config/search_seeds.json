@@ -1,0 +1,23 @@
+{
+  "brands": [
+    {"label_ja": "日産", "query": "Nissan"},
+    {"label_ja": "トヨタ", "query": "Toyota"},
+    {"label_ja": "ホンダ", "query": "Honda"},
+    {"label_ja": "マツダ", "query": "Mazda"},
+    {"label_ja": "スバル", "query": "Subaru"},
+    {"label_ja": "三菱", "query": "Mitsubishi"},
+    {"label_ja": "スズキ", "query": "Suzuki"},
+    {"label_ja": "いすゞ", "query": "Isuzu"}
+  ],
+  "authenticity_terms": ["OEM", "Genuine", "Factory Original"],
+  "small_part_terms": [
+    "switch", "sensor", "relay", "trim", "garnish", "bracket", "knob",
+    "cap", "cover", "emblem", "seal", "clip", "molding", "handle",
+    "bezel", "retainer", "button", "lamp", "socket"
+  ],
+  "blocked_title_terms": [
+    "AIRBAG", "BATTERY", "ENGINE", "TRANSMISSION", "BUMPER", "TIRE",
+    "WHEEL", "WINDSHIELD", "DOOR SHELL", "SEAT ASSEMBLY", "FUEL TANK",
+    "CATALYTIC CONVERTER", "OIL", "PAINT", "AEROSOL"
+  ]
+}
