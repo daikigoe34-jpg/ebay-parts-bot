@@ -1,0 +1,37 @@
+name: Apply Part Scout v0.4.1
+
+on:
+  push:
+    branches: ["agent/part-scout-production-v0.4.1"]
+    paths:
+      - ".release/v041/**"
+      - ".github/workflows/apply-v041.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: リポジトリを取得
+        uses: actions/checkout@v6
+        with:
+          ref: agent/part-scout-production-v0.4.1
+          fetch-depth: 0
+
+      - name: v0.4.1パッチを検証して適用
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .release/v041/patch-* | base64 --decode > /tmp/part-scout-v041.patch.gz
+          echo "5f0cf485c48166adece36e45df3bfea4ddbe0d82df5028858668d545b29a71f0  /tmp/part-scout-v041.patch.gz" | sha256sum -c -
+          gzip -dc /tmp/part-scout-v041.patch.gz > /tmp/part-scout-v041.patch
+          git apply --check /tmp/part-scout-v041.patch
+          git apply /tmp/part-scout-v041.patch
+          rm -rf .release
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Part Scout Mobile v0.4.1へ更新"
+          git push origin HEAD:agent/part-scout-production-v0.4.1
