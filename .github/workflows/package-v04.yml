@@ -1,0 +1,68 @@
+name: Package Part Scout v0.4.0
+
+on:
+  push:
+    branches: ["agent/package-part-scout-v0.4.0"]
+    paths:
+      - ".github/workflows/package-v04.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: パッケージ用ブランチを取得
+        uses: actions/checkout@v6
+        with:
+          ref: agent/package-part-scout-v0.4.0
+          fetch-depth: 0
+
+      - name: mainの確定コミットをZIP化
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE_SHA="cc7c817638341aa88b5be617727994ca7d81ce12"
+          ZIP_NAME="part-scout-mobile-v0.4.0.zip"
+          rm -rf .package
+          mkdir -p .package
+
+          git cat-file -e "${SOURCE_SHA}^{commit}"
+          git archive \
+            --format=zip \
+            --prefix="part-scout-mobile-v0.4.0/" \
+            --output="/tmp/${ZIP_NAME}" \
+            "${SOURCE_SHA}"
+
+          ZIP_SHA=$(sha256sum "/tmp/${ZIP_NAME}" | awk '{print $1}')
+          ZIP_SIZE=$(stat -c '%s' "/tmp/${ZIP_NAME}")
+          base64 -w 0 "/tmp/${ZIP_NAME}" | split -b 40000 -d -a 3 - .package/chunk-
+          CHUNK_COUNT=$(find .package -maxdepth 1 -type f -name 'chunk-*' | wc -l | tr -d ' ')
+
+          python - <<PY
+          import json
+          from pathlib import Path
+          payload = {
+              "file_name": "${ZIP_NAME}",
+              "source_commit": "${SOURCE_SHA}",
+              "sha256": "${ZIP_SHA}",
+              "size_bytes": int("${ZIP_SIZE}"),
+              "chunk_count": int("${CHUNK_COUNT}"),
+              "chunk_encoding": "base64-concatenated",
+          }
+          Path('.package/manifest.json').write_text(
+              json.dumps(payload, ensure_ascii=False, indent=2) + '\n',
+              encoding='utf-8',
+          )
+          Path('.package/sha256.txt').write_text(
+              f"${ZIP_SHA}  ${ZIP_NAME}\n",
+              encoding='utf-8',
+          )
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .package
+          git commit -m "package: Part Scout Mobile v0.4.0"
+          git push origin HEAD:agent/package-part-scout-v0.4.0
