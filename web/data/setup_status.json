@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "app_version": "0.4.0",
+  "checked_at": "",
+  "ready": false,
+  "status": "not_checked",
+  "mode": "production_browse_only",
+  "message": "Production APIの接続確認がまだです",
+  "next_action": "eBay Production APIキーを登録して初回調査を実行",
+  "links": {
+    "secrets": "https://github.com/daikigoe34-jpg/ebay-parts-bot/settings/secrets/actions",
+    "pages": "https://github.com/daikigoe34-jpg/ebay-parts-bot/settings/pages",
+    "workflow": "https://github.com/daikigoe34-jpg/ebay-parts-bot/actions/workflows/research.yml",
+    "buy_api_access": "https://developer.ebay.com/api-docs/buy/static/buy-requirements.html"
+  },
+  "details": {}
+}
