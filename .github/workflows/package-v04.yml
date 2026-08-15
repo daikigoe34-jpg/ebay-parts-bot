@@ -38,6 +38,7 @@ jobs:
 
           ZIP_SHA=$(sha256sum "/tmp/${ZIP_NAME}" | awk '{print $1}')
           ZIP_SIZE=$(stat -c '%s' "/tmp/${ZIP_NAME}")
+          cp "/tmp/${ZIP_NAME}" ".package/${ZIP_NAME}"
           base64 -w 0 "/tmp/${ZIP_NAME}" | split -b "${CHUNK_SIZE}" -d -a 3 - .package/chunk-
           CHUNK_COUNT=$(find .package -maxdepth 1 -type f -name 'chunk-*' | wc -l | tr -d ' ')
 
@@ -66,5 +67,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A .package
-          git commit -m "package: Part Scout Mobile v0.4.0 small chunks"
+          git commit -m "package: Part Scout Mobile v0.4.0 binary asset"
           git push origin HEAD:agent/package-part-scout-v0.4.0
