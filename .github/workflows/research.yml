@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   research:
-    name: 調査・検証・結果保存
+    name: Production Browse API調査・検証・保存
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -29,16 +29,14 @@ jobs:
       RAKUTEN_ACCESS_KEY: ${{ secrets.RAKUTEN_ACCESS_KEY }}
       EBAY_MARKETPLACE: EBAY_US
       EBAY_CATEGORY_ID: "6028"
-      # Productionキーセットだけで使う標準モード。
-      # Marketplace Insightsは別途承認が必要で、新規利用者には開放されていないため試行しません。
-      # 将来eBayから個別承認された場合だけ"true"へ変更します。
-      ENABLE_MARKETPLACE_INSIGHTS: "false"
       RESEARCH_QUERY: ${{ github.event_name == 'workflow_dispatch' && inputs.query || '' }}
       QUERIES_PER_RUN: "8"
       MAX_DISCOVERY_ITEMS: "40"
       MAX_DISCOVERY_DETAILS: "20"
       MAX_CANDIDATES: "24"
       MAX_EXACT_DETAILS: "50"
+      # eBayの既定日次枠より余裕を残す安全上限。OAuthと再試行も1回として数えます。
+      API_CALL_BUDGET: "3500"
       DEFAULT_INTL_SHIPPING_JPY: "2800"
       FALLBACK_USDJPY: "150"
     steps:
@@ -66,52 +64,62 @@ jobs:
       - name: 構文・JSON検証
         run: |
           python -m py_compile scripts/core.py scripts/research.py
-          node --check web/app-01.js
-          node --check web/app-02.js
-          node --check web/app-03.js
           node --check web/app.js
           node --check web/sw.js
           python -m json.tool web/manifest.webmanifest >/dev/null
           python -m json.tool config/search_seeds.json >/dev/null
+          python -m json.tool web/data/setup_status.json >/dev/null
 
-      - name: eBay・楽天・為替を自動調査
+      - name: Production Browse API・楽天・為替を自動調査
         run: python scripts/research.py
 
-      - name: 出力JSONを検証
+      - name: 接続状態と出力JSONを検証
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
 
-          path = Path("web/data/results.json")
-          data = json.loads(path.read_text(encoding="utf-8"))
-          assert data.get("schema_version") == 3
-          assert data.get("app_version") == "0.3.1"
+          setup = json.loads(Path("web/data/setup_status.json").read_text(encoding="utf-8"))
+          assert setup.get("schema_version") == 1
+          assert setup.get("app_version") == "0.4.0"
+          assert setup.get("mode") == "production_browse_only"
+          assert setup.get("status")
+
+          if not setup.get("ready"):
+              print(f"setup not ready: {setup['status']} / {setup.get('next_action', '')}")
+              raise SystemExit(0)
+
+          data = json.loads(Path("web/data/results.json").read_text(encoding="utf-8"))
+          assert data.get("schema_version") == 4
+          assert data.get("app_version") == "0.4.0"
           assert isinstance(data.get("products"), list)
           assert isinstance(data.get("automation"), dict)
           assert isinstance(data.get("cost_defaults"), dict)
-          assert isinstance(data["automation"].get("marketplace_insights"), dict)
-          assert data["automation"].get("sales_source_priority") == ["marketplace_insights_90d", "daily_snapshot_delta"]
+          assert isinstance(data["automation"].get("production_api"), dict)
+          assert data["automation"].get("sales_source_priority") == ["daily_snapshot_delta"]
+          assert data["automation"].get("manual_sales_entry_required") is False
           assert data.get("generated_at")
           for product in data["products"]:
               assert product.get("part_number")
+              assert "sold_90d_decision" in product
               assert "sales_confidence" in product
               assert "sales_tracked_listings" in product
               assert "sales_observed_delta" in product
-              assert "marketplace_insights" in product
+              assert product.get("sales_scope") == "browse_estimated_sold_quantity_daily_delta"
               assert "tariff" in product
               assert product["tariff"].get("screening_only") is True
               assert "auto_costs" in product
           print(f"validated: {len(data['products'])} products")
           PY
 
-      - name: 調査結果と学習状態をmainへ保存
+      - name: 調査結果・接続状態・学習状態をmainへ保存
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add \
+            web/data/setup_status.json \
             web/data/results.json \
             state/snapshots.json \
             state/watchlist.json \
@@ -120,7 +128,6 @@ jobs:
             echo "保存対象の差分はありません。"
             exit 0
           fi
-          git commit -m "data: eBay自動調査と販売差分を更新"
-          # Pages設定等の別コミットが先に入っても、履歴を壊さず追従します。
+          git commit -m "data: Production API調査と販売差分を更新"
           git pull --rebase origin "${{ github.event.repository.default_branch }}"
           git push origin "HEAD:${{ github.event.repository.default_branch }}"
