@@ -4,11 +4,16 @@ from scripts.core import (
     ProfitInputs,
     calculate_profit,
     estimate_competition,
+    estimate_sales_pace,
     estimate_90d_sold,
+    extract_country_of_origin,
     extract_part_numbers,
     extract_part_numbers_from_text,
+    international_fee_rate,
     market_score,
+    tariff_scenario,
 )
+from scripts.research import aggregate_sales_estimate
 
 
 def test_extract_toyota_and_honda_numbers():
@@ -28,7 +33,7 @@ def test_aspect_is_preferred():
     assert extract_part_numbers(item) == ["25550-5SA0A"]
 
 
-def test_snapshot_delta_is_annualized_to_90_days():
+def test_snapshot_delta_is_scaled_to_90_days_and_high_after_30_days():
     now = datetime(2026, 8, 15, tzinfo=timezone.utc)
     item = {
         "itemId": "v1|123|0",
@@ -42,11 +47,98 @@ def test_snapshot_delta_is_annualized_to_90_days():
         }
     ]
     value, quality = estimate_90d_sold(item, history, now=now)
+    details = estimate_sales_pace(item, history, now=now)
     assert value == 30.0
-    assert quality == "observed_delta"
+    assert quality == "observed_delta_30d"
+    assert details["confidence"] == "high"
+    assert details["auto_verified"] is True
 
 
-def test_profit_includes_tariff_and_fees():
+def test_short_snapshot_history_is_not_explosively_annualized():
+    now = datetime(2026, 8, 15, tzinfo=timezone.utc)
+    item = {
+        "itemId": "v1|short|0",
+        "estimatedAvailabilities": [{"estimatedSoldQuantity": 20}],
+    }
+    history = [
+        {
+            "item_id": "v1|short|0",
+            "observed_at": (now - timedelta(days=1)).isoformat(),
+            "sold_quantity": 19,
+        }
+    ]
+    details = estimate_sales_pace(item, history, now=now)
+    assert details["quality"] == "insufficient"
+    assert details["estimate"] == 0
+    assert details["auto_verified"] is False
+
+
+def test_part_level_delta_keeps_recent_listing_that_disappeared():
+    now = datetime(2026, 8, 15, tzinfo=timezone.utc)
+    part = "25550-5SA0A"
+    current = {
+        "itemId": "current",
+        "estimatedAvailabilities": [{"estimatedSoldQuantity": 7}],
+    }
+    snapshots = {
+        "current": [
+            {
+                "item_id": "current",
+                "part_numbers": [part],
+                "observed_at": (now - timedelta(days=30)).isoformat(),
+                "sold_quantity": 5,
+            }
+        ],
+        "ended": [
+            {
+                "item_id": "ended",
+                "part_numbers": [part],
+                "observed_at": (now - timedelta(days=30)).isoformat(),
+                "sold_quantity": 10,
+            },
+            {
+                "item_id": "ended",
+                "part_numbers": [part],
+                "observed_at": (now - timedelta(days=5)).isoformat(),
+                "sold_quantity": 13,
+            },
+        ],
+    }
+    result = aggregate_sales_estimate(part, [current], snapshots, now)
+    # 2 units over 30 days + 3 over 25 days. Each listing uses its own window:
+    # (2 / 30 + 3 / 25) * 90 = 16.8.
+    assert result["observed_delta"] == 5
+    assert result["estimate"] == 16.8
+    assert result["observed_days"] == 27.5
+    assert result["tracked_listings"] == 2
+    assert result["confidence"] == "medium"
+
+
+def test_part_level_delta_reaches_high_confidence_after_median_30_days():
+    now = datetime(2026, 8, 15, tzinfo=timezone.utc)
+    part = "25550-5SA0A"
+    items = []
+    snapshots = {}
+    for index, days in enumerate((30, 35, 40), start=1):
+        item_id = f"item-{index}"
+        items.append({
+            "itemId": item_id,
+            "estimatedAvailabilities": [{"estimatedSoldQuantity": 4}],
+        })
+        snapshots[item_id] = [{
+            "item_id": item_id,
+            "part_numbers": [part],
+            "observed_at": (now - timedelta(days=days)).isoformat(),
+            "sold_quantity": 2,
+        }]
+    result = aggregate_sales_estimate(part, items, snapshots, now)
+    assert result["tracked_listings"] == 3
+    assert result["observed_days"] == 35.0
+    assert result["confidence"] == "high"
+    assert result["auto_verified"] is True
+
+
+def test_profit_includes_tariff_ebay_tax_and_payoneer():
     result = calculate_profit(
         ProfitInputs(
             sale_price_usd=100,
@@ -54,11 +146,13 @@ def test_profit_includes_tariff_and_fees():
             procurement_jpy=4000,
             international_shipping_jpy=2500,
             tariff_rate=0.15,
-            fx_spread_rate=0.02,
+            payoneer_withdrawal_rate=0.03,
             return_reserve_rate=0.03,
         )
     )
     assert result["tariff_jpy"] == 2250
+    assert result["ebay_fee_tax_jpy"] > 0
+    assert result["payoneer_fee_jpy"] > 0
     assert result["profit_jpy"] < 5000
 
 
@@ -74,7 +168,7 @@ def test_year_range_and_unit_are_not_part_numbers():
     assert "12-VOLT" not in values
 
 
-def test_fee_base_includes_assumed_buyer_sales_tax():
+def test_fee_base_includes_buyer_sales_tax_and_japan_consumption_tax():
     result = calculate_profit(
         ProfitInputs(
             sale_price_usd=100,
@@ -83,15 +177,18 @@ def test_fee_base_includes_assumed_buyer_sales_tax():
             international_shipping_jpy=1,
             ebay_fee_rate=0.10,
             international_fee_rate=0,
-            fx_spread_rate=0,
+            payoneer_withdrawal_rate=0,
             tariff_rate=0,
             return_reserve_rate=0,
             per_order_fee_usd=0,
             buyer_sales_tax_rate=0.10,
+            ebay_fee_tax_rate=0.10,
         )
     )
     assert result["buyer_sales_tax_usd"] == 10.0
-    assert result["ebay_fee_jpy"] == 1100
+    assert result["final_value_fee_jpy"] == 1100
+    assert result["ebay_fee_tax_jpy"] == 110
+    assert result["ebay_fee_jpy"] == 1210
 
 
 def test_fitment_and_dimension_tokens_are_not_part_numbers():
@@ -131,7 +228,7 @@ def test_competition_estimate_does_not_claim_keyword_total_without_matches():
     assert result["confidence"] == "low"
 
 
-def test_ebay_fee_uses_tiered_rate_and_low_order_fixed_fee():
+def test_ebay_fee_uses_tiered_rate_low_order_fee_and_tax():
     low_order = calculate_profit(
         ProfitInputs(
             sale_price_usd=9,
@@ -142,12 +239,78 @@ def test_ebay_fee_uses_tiered_rate_and_low_order_fixed_fee():
             ebay_fee_threshold_usd=5,
             ebay_fee_above_rate=0.02,
             international_fee_rate=0,
-            fx_spread_rate=0,
+            payoneer_withdrawal_rate=0,
             tariff_rate=0,
             return_reserve_rate=0,
             per_order_fee_usd=0.40,
             buyer_sales_tax_rate=0,
+            ebay_fee_tax_rate=0.10,
         )
     )
-    # $5 × 10% + $4 × 2% + $0.30 = $0.88
-    assert low_order["ebay_fee_jpy"] == 88
+    # $5 × 10% + $4 × 2% + $0.30 = $0.88; Japan consumption tax = $0.088.
+    assert low_order["final_value_fee_jpy"] == 88
+    assert low_order["ebay_fee_tax_jpy"] == 9
+    assert low_order["ebay_fee_jpy"] == 97
+
+
+def test_payoneer_is_separate_and_applied_after_ebay_fees():
+    result = calculate_profit(
+        ProfitInputs(
+            sale_price_usd=100,
+            exchange_rate=100,
+            procurement_jpy=1,
+            international_shipping_jpy=1,
+            ebay_fee_rate=0,
+            international_fee_rate=0,
+            ebay_fee_tax_rate=0,
+            payoneer_withdrawal_rate=0.03,
+            tariff_rate=0,
+            return_reserve_rate=0,
+            per_order_fee_usd=0,
+            buyer_sales_tax_rate=0,
+        )
+    )
+    assert result["payoneer_fee_jpy"] == 300
+
+
+def test_international_fee_volume_tiers():
+    assert international_fee_rate(0) == 0.0135
+    assert international_fee_rate(3_000) == 0.0120
+    assert international_fee_rate(10_000) == 0.0095
+    assert international_fee_rate(50_000) == 0.0070
+    assert international_fee_rate(100_000) == 0.0040
+
+
+def test_origin_comes_from_structured_aspect_not_seller_location():
+    item = {
+        "itemLocation": {"country": "US"},
+        "localizedAspects": [{"name": "Country/Region of Manufacture", "value": "Japan"}],
+    }
+    assert extract_country_of_origin(item) == ("JP", "aspect")
+    scenario = tariff_scenario("JP")
+    assert scenario["rate"] == 0.15
+    assert scenario["confirmation_required"] is True
+
+
+def test_unknown_origin_uses_conservative_screening_not_false_certainty():
+    scenario = tariff_scenario("")
+    assert scenario["rate"] == 0.25
+    assert scenario["confidence"] == "unknown"
+    assert scenario["confirmation_required"] is True
+
+
+def test_query_rotation_advances_without_random_repeats():
+    from scripts.research import choose_queries
+
+    seeds = {
+        "brands": [{"label_ja": "日産", "query": "Nissan"}, {"label_ja": "トヨタ", "query": "Toyota"}],
+        "authenticity_terms": ["OEM", "Genuine"],
+        "small_part_terms": ["switch", "sensor"],
+    }
+    state = {}
+    first = choose_queries(seeds, state, count=2)
+    second = choose_queries(seeds, state, count=2)
+    assert len(first) == 2
+    assert len(second) == 2
+    assert {query for query, _ in first}.isdisjoint({query for query, _ in second})
+    assert state["query_cursor"] == 0

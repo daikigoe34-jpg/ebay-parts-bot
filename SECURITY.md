@@ -1,46 +1,62 @@
 # Security
 
-## eBayキー
+## 秘密情報
 
-- `EBAY_CLIENT_ID`と`EBAY_CLIENT_SECRET`はGitHub ActionsのRepository Secretsへ登録します。
-- Client Secret、Application Token、User Tokenをソースコードへ書かないでください。
-- 誤って公開した場合は、eBay Developer Portalでキーを再発行し、GitHubのコミット履歴からも除去してください。
+次の値はGitHub ActionsのRepository Secretsへ登録し、ソースコードへ書かないでください。
 
-## 公開されるもの
+- `EBAY_CLIENT_ID`
+- `EBAY_CLIENT_SECRET`
+- `RAKUTEN_APPLICATION_ID`（楽天自動価格を使う場合）
+- `RAKUTEN_ACCESS_KEY`（楽天自動価格を使う場合）
 
-GitHub Pagesは公開サイトです。公開リポジトリを使う場合、次は第三者から閲覧可能です。
+誤って公開した場合は、各サービスでキーを失効・再発行し、GitHub履歴からも除去してください。
+
+## 公開されるデータ
+
+このリポジトリとGitHub Pagesが公開の場合、次は第三者から閲覧できます。
 
 - ソースコード
-- ランダム検索条件
-- API調査結果 `web/data/results.json`
-- 日次販売数量スナップショット `state/snapshots.json`
+- 検索語と監視品番
+- eBay公開出品から得た市場集計
+- `web/data/results.json`
+- `state/snapshots.json`
+- `state/watchlist.json`
+- `state/research_state.json`
+- 楽天APIから得た公開商品名・価格・URL
 
-## GitHubへ送られないもの
+個人情報、購入履歴、eBayログイン情報は保存しません。
 
-次はSafariのlocalStorageに保存され、通常はGitHubへ送信されません。
+## iPhone内だけに保存するデータ
 
-- モノタロウ／楽天の仕入価格
+次はSafariのlocalStorageへ保存し、通常はGitHubへ送信しません。
+
+- 手動修正した仕入価格
 - 国内・国際送料
-- 梱包費、固定通関費
-- DDP関税の確認状態
-- 利益設定
-- Product Researchの手入力補正
-- 取り込んだCSVの集計結果
+- 梱包費、通関固定費
+- 原産国・関税確認状態
+- Payoneer率と手数料設定
+- Product Researchの手入力／CSV補正
+- 利益判定設定
 
-ただし、Safariのサイトデータ削除・端末変更・閲覧履歴消去等で失われる可能性があります。必要な一覧はCSV保存してください。
+Safariのサイトデータ削除、端末変更、プライベートブラウズ等で失われる可能性があります。必要な一覧はCSVで保存してください。
 
-## 外部サイト
+## 外部サービス
 
-- モノタロウ、楽天、eBayへは検索リンクで移動するだけです。
-- ログイン情報、Cookie、購入情報を読み取りません。
-- 自動発注、自動購入、自動出品は行いません。
-
-## 脆弱性
-
-第三者へ公開する前に、GitHubのSecret scanningとDependabot alertsを有効にすることを推奨します。
+- eBayはApplication Tokenで公開Browse APIを読み取ります。User TokenやSeller HubのCookieは使用しません。
+- 楽天は公式商品検索APIだけを使用します。
+- モノタロウは品番入力済み検索URLを開くだけで、ログイン情報、Cookie、購入情報を読み取りません。
+- ECBの公開為替レートを読み取ります。
+- 自動購入、自動発注、自動出品、自動価格変更は行いません。
 
 ## 判定上の安全策
 
-- Browse API推定だけでは最終の`販売候補`にしません。
-- Product Researchの90日実績とDDP関税実見積の両方を確認した場合だけ`販売候補`にします。
-- キーワード検索の総件数は、そのまま同一品番の競合数として扱いません。
+- 7日未満の販売差分を90日へ拡大しません。
+- 観測開始前の累計販売数量を販売実績として計上しません。
+- 競合検索総数をそのまま同一品番の競合数にしません。
+- 30日以上の差分だけでなく、市場カバーと追跡出品数も満たす場合だけ「自動精度・高」にします。
+- 原産国不明は低い税率へ決め打ちせず、25%の保守的な仮計算にします。
+- 仕入条件と原産国・関税の確認前は、最終の`購入候補`にしません。
+
+## GitHub設定
+
+第三者へ公開する場合は、Secret scanning、Dependabot alerts、Actionsの最小権限を有効にしてください。ワークフローの書込み権限は、調査JSONと学習状態を`main`へ保存する用途だけに使用します。
