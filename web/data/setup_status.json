@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "app_version": "0.4.0",
-  "checked_at": "",
+  "checked_at": "2026-08-15T21:35:54.460002Z",
   "ready": false,
-  "status": "not_checked",
+  "status": "missing_secrets",
   "mode": "production_browse_only",
-  "message": "Production APIの接続確認がまだです",
-  "next_action": "eBay Production APIキーを登録して初回調査を実行",
+  "message": "eBay Production APIキーが未登録です",
+  "next_action": "GitHub SecretsへEBAY_CLIENT_IDとEBAY_CLIENT_SECRETを登録",
   "links": {
     "secrets": "https://github.com/daikigoe34-jpg/ebay-parts-bot/settings/secrets/actions",
     "pages": "https://github.com/daikigoe34-jpg/ebay-parts-bot/settings/pages",
