@@ -3,6 +3,7 @@
   "source_commit": "cc7c817638341aa88b5be617727994ca7d81ce12",
   "sha256": "095a1ccb9243e83c75ae2b55eae3746381aaf28a3235d63974aa54ba27876711",
   "size_bytes": 75789,
-  "chunk_count": 3,
+  "chunk_count": 13,
+  "chunk_size_chars": 8000,
   "chunk_encoding": "base64-concatenated"
 }
