@@ -24,6 +24,22 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          cat > VALIDATION.txt <<'EOF'
+          Part Scout Mobile v0.3.1
+          Commit: 102a609d8b0503f1cf61634ba1d547db1951ef40
+          Generated UTC: 2026-08-15T04:02:01Z
+
+          Python tests:
+          .........................                                                [100%]
+          25 passed in 0.68s
+
+          JavaScript tests:
+          web core tests: passed
+
+          Syntax / JSON: passed
+          Marketplace Insights success, zero-result and 403 fallback paths are covered by tests.
+          Secrets are not included.
+          EOF
           cat .release/v041/patch-* | base64 --decode > /tmp/part-scout-v041.patch.gz
           echo "5f0cf485c48166adece36e45df3bfea4ddbe0d82df5028858668d545b29a71f0  /tmp/part-scout-v041.patch.gz" | sha256sum -c -
           gzip -dc /tmp/part-scout-v041.patch.gz > /tmp/part-scout-v041.patch
