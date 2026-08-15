@@ -67,5 +67,17 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A .package
-          git commit -m "package: Part Scout Mobile v0.4.0 binary asset"
-          git push origin HEAD:agent/package-part-scout-v0.4.0
+          if ! git diff --cached --quiet; then
+            git commit -m "package: Part Scout Mobile v0.4.0 binary asset"
+            git push origin HEAD:agent/package-part-scout-v0.4.0
+          else
+            echo "パッケージ内容は前回と同一です。"
+          fi
+
+      - name: 配布ZIPをActions成果物へ保存
+        uses: actions/upload-artifact@v4
+        with:
+          name: part-scout-mobile-v0.4.0
+          path: .package/part-scout-mobile-v0.4.0.zip
+          if-no-files-found: error
+          retention-days: 30
