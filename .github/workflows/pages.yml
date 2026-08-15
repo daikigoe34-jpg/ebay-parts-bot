@@ -27,16 +27,46 @@ jobs:
       - name: リポジトリを取得
         uses: actions/checkout@v6
 
-      - name: Pagesを設定・初回は自動有効化
+      - name: Pagesが初回有効化済みか確認
+        id: pages
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          code=$(curl -sS \
+            -o /tmp/pages.json \
+            -w "%{http_code}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/pages")
+          if [ "$code" = "200" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            echo "GitHub Pagesは有効です。"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=最初の1回だけ設定が必要::Settings → Pages → Build and deployment → Source を GitHub Actions にしてください。HTTP ${code}"
+            cat /tmp/pages.json || true
+          fi
+
+      - name: Pagesを設定
+        if: steps.pages.outputs.enabled == 'true'
         uses: actions/configure-pages@v6
-        with:
-          enablement: true
 
       - name: 公開ファイルをアップロード
+        if: steps.pages.outputs.enabled == 'true'
         uses: actions/upload-pages-artifact@v5
         with:
           path: web
 
       - name: GitHub Pagesへ公開
+        if: steps.pages.outputs.enabled == 'true'
         id: deployment
         uses: actions/deploy-pages@v4
+
+      - name: 未設定時の案内
+        if: steps.pages.outputs.enabled != 'true'
+        run: |
+          echo "Pagesはまだ公開していません。コードの失敗ではありません。"
+          echo "Settings → Pages → Source: GitHub Actions を1回設定後、このワークフローを再実行してください。"
