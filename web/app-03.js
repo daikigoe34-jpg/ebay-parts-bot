@@ -53,9 +53,16 @@ function renderAutomation() {
   els.flowResearch.textContent = automation.queries_per_run
     ? `1回${number(automation.queries_per_run)}語を巡回／監視品番${number(automation.watchlist_size)}件`
     : "GitHub Actionsで毎日自動実行";
-  els.flowMarket.textContent = automation.snapshot_runs
-    ? `差分記録 ${number(automation.snapshot_runs)}回。30日で自動精度・高`
-    : "差分記録を開始します";
+  const insights = automation.marketplace_insights || {};
+  if (insights.available) {
+    els.flowMarket.textContent = `eBay公式90日成約を自動取得／差分記録${number(automation.snapshot_runs)}回`;
+  } else if (insights.status === "not_approved") {
+    els.flowMarket.textContent = `公式成約API未承認のため自動差分へ切替／記録${number(automation.snapshot_runs)}回`;
+  } else {
+    els.flowMarket.textContent = automation.snapshot_runs
+      ? `差分記録 ${number(automation.snapshot_runs)}回。30日で自動精度・高`
+      : "公式成約APIを自動確認し、使えなければ差分記録を開始";
+  }
   els.flowProcurement.textContent = automation.rakuten_enabled
     ? "楽天API接続済み。仕入価格を自動入力"
     : "楽天API未設定。検索ボタンで確認";
@@ -158,16 +165,23 @@ function createProductCard(product, rank) {
   card.querySelector(".competition-value").textContent = product.competition_known === false ? "不明" : `${competitionPrefix}${Math.round(number(product.active_competition))}件`;
   card.querySelector(".price-value").textContent = usd(product.price_median_usd);
   card.querySelector(".profit-value-main").textContent = profit.hasCosts ? yen(profit.profit) : "未確定";
-  card.querySelector(".quality-label").textContent = SALES_CONFIDENCE_LABELS[confidence] || QUALITY_LABELS[product.sales_quality] || "不明";
-  card.querySelector(".observation-label").textContent = isSalesAutoVerified(product)
-    ? `観測 ${Math.round(number(product.sales_observed_days, 90))}日`
-    : `観測 ${Math.round(number(product.sales_observed_days))}日 / 30日で高精度`;
+  const officialSales = product.sales_quality === "marketplace_insights_90d";
+  card.querySelector(".quality-label").textContent = QUALITY_LABELS[product.sales_quality] || SALES_CONFIDENCE_LABELS[confidence] || "不明";
+  card.querySelector(".observation-label").textContent = officialSales
+    ? "eBay公式・過去90日"
+    : isSalesAutoVerified(product)
+      ? `観測 ${Math.round(number(product.sales_observed_days, 90))}日`
+      : `観測 ${Math.round(number(product.sales_observed_days))}日 / 30日で高精度`;
   const low = number(product.sold_90d_low, 0);
   const high = number(product.sold_90d_high, number(product.sold_90d_est));
-  const tracking = number(product.sales_tracked_listings) > 0
-    ? `追跡${Math.round(number(product.sales_tracked_listings))}出品・観測増分${Math.round(number(product.sales_observed_delta))}個 / `
-    : "";
-  card.querySelector(".range-note").textContent = `${tracking}推定幅 ${low.toFixed(1)}–${high.toFixed(1)}個 / 相場帯 ${usd(product.price_p25_usd)}–${usd(product.price_p75_usd)} / 市場スコア ${number(product.market_score)}`;
+  const tracking = officialSales
+    ? `公式成約${Math.round(number(product.sales_observed_delta))}個・一致${Math.round(number(product.sales_tracked_listings))}出品 / `
+    : number(product.sales_tracked_listings) > 0
+      ? `追跡${Math.round(number(product.sales_tracked_listings))}出品・観測増分${Math.round(number(product.sales_observed_delta))}個 / `
+      : "";
+  const rangeText = officialSales ? `実績 ${low.toFixed(1)}個` : `推定幅 ${low.toFixed(1)}–${high.toFixed(1)}個`;
+  const priceLabel = product.price_source === "marketplace_insights_last_sold" ? "成約相場帯" : "出品相場帯";
+  card.querySelector(".range-note").textContent = `${tracking}${rangeText} / ${priceLabel} ${usd(product.price_p25_usd)}–${usd(product.price_p75_usd)} / 市場スコア ${number(product.market_score)}`;
 
   card.querySelector(".procurement-value").textContent = number(values.procurementJpy) > 0 ? yen(values.procurementJpy) : "未取得";
   card.querySelector(".shipping-value").textContent = yen(values.internationalShippingJpy);

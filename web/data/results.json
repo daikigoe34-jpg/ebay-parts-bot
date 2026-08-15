@@ -1,6 +1,6 @@
 {
   "schema_version": 3,
-  "app_version": "0.3.0",
+  "app_version": "0.3.1",
   "generated_at": "2026-08-15T02:20:00Z",
   "marketplace": "EBAY_US",
   "category_id": "6028",
@@ -20,7 +20,21 @@
     "snapshot_runs": 37,
     "rakuten_enabled": true,
     "product_research_required_for_auto_verified": false,
-    "high_confidence_after_days": 30
+    "high_confidence_after_days": 30,
+    "marketplace_insights": {
+      "enabled": true,
+      "attempted": false,
+      "available": false,
+      "status": "not_attempted",
+      "reason": "",
+      "official_90d_queries": 0,
+      "snapshot_fallback_queries": 0,
+      "fallback_method": "daily_snapshot_delta"
+    },
+    "sales_source_priority": [
+      "marketplace_insights_90d",
+      "daily_snapshot_delta"
+    ]
   },
   "cost_defaults": {
     "exchange_rate": {
@@ -44,7 +58,7 @@
     "default_international_shipping_jpy": 2800,
     "default_packaging_jpy": 150
   },
-  "method_note": "これは画面確認用のデモです。eBay公開APIは販売済み90日実績を直接返さないため、各出品の累計販売数を毎日保存し、出品ごとの観測期間で増分を90日換算して合算します。7日未満は学習中、14日以上は中精度、30日以上かつ同一品番の市場カバーが十分な場合だけ「自動精度・高」です。Product Research入力は任意です。楽天API設定時は品番一致の仕入価格を自動入力します。関税・送料は仕入前に最終確認してください。",
+  "method_note": "Marketplace Insightsの利用承認がある場合はeBay公式の過去90日成約数・最終成約価格を自動使用します。未承認の場合は操作不要で日次スナップショット差分へ切り替えます。関税率はHTSUS・原産国・DDP確認前のスクリーニング仮置きです。",
   "products": [
     {
       "part_number": "25550-5SA0A",
@@ -91,7 +105,14 @@
         "high_rate": 0.25,
         "basis": "japan_auto_parts_15pct_baseline",
         "confidence": "medium",
-        "confirmation_required": true
+        "confirmation_required": true,
+        "screening_only": true,
+        "is_exact": false,
+        "requires_htsus": true,
+        "requires_origin_proof": true,
+        "requires_ddp_quote": true,
+        "de_minimis_exemption_assumed": false,
+        "last_verified": "2026-08-15"
       },
       "rakuten": {
         "enabled": true,
@@ -124,7 +145,16 @@
       "sales_observed_days_max": 41,
       "sales_short_history_listings": 0,
       "category_id": "33579",
-      "category_path": "eBay Motors > Parts & Accessories > Car & Truck Parts & Accessories > Interior Parts & Accessories > Switches & Controls"
+      "category_path": "eBay Motors > Parts & Accessories > Car & Truck Parts & Accessories > Interior Parts & Accessories > Switches & Controls",
+      "marketplace_insights": {
+        "available": false,
+        "status": "not_attempted",
+        "used": false,
+        "search_total": 0,
+        "search_returned": 0,
+        "exact_match_count": 0,
+        "last_sold_date": ""
+      }
     },
     {
       "part_number": "84912-FJ000",
@@ -171,7 +201,14 @@
         "high_rate": 0.5,
         "basis": "unknown_origin_conservative",
         "confidence": "unknown",
-        "confirmation_required": true
+        "confirmation_required": true,
+        "screening_only": true,
+        "is_exact": false,
+        "requires_htsus": true,
+        "requires_origin_proof": true,
+        "requires_ddp_quote": true,
+        "de_minimis_exemption_assumed": false,
+        "last_verified": "2026-08-15"
       },
       "rakuten": {
         "enabled": true,
@@ -195,7 +232,16 @@
       "sales_observed_days_max": 22,
       "sales_short_history_listings": 0,
       "category_id": "33579",
-      "category_path": "eBay Motors > Parts & Accessories > Car & Truck Parts & Accessories > Interior Parts & Accessories > Switches & Controls"
+      "category_path": "eBay Motors > Parts & Accessories > Car & Truck Parts & Accessories > Interior Parts & Accessories > Switches & Controls",
+      "marketplace_insights": {
+        "available": false,
+        "status": "not_attempted",
+        "used": false,
+        "search_total": 0,
+        "search_returned": 0,
+        "exact_match_count": 0,
+        "last_sold_date": ""
+      }
     },
     {
       "part_number": "72155-S5A-A01",
@@ -242,7 +288,14 @@
         "high_rate": 0.25,
         "basis": "japan_auto_parts_15pct_baseline",
         "confidence": "medium",
-        "confirmation_required": true
+        "confirmation_required": true,
+        "screening_only": true,
+        "is_exact": false,
+        "requires_htsus": true,
+        "requires_origin_proof": true,
+        "requires_ddp_quote": true,
+        "de_minimis_exemption_assumed": false,
+        "last_verified": "2026-08-15"
       },
       "rakuten": {
         "enabled": true,
@@ -275,7 +328,16 @@
       "sales_observed_days_max": 8,
       "sales_short_history_listings": 7,
       "category_id": "33579",
-      "category_path": "eBay Motors > Parts & Accessories > Car & Truck Parts & Accessories > Interior Parts & Accessories > Switches & Controls"
+      "category_path": "eBay Motors > Parts & Accessories > Car & Truck Parts & Accessories > Interior Parts & Accessories > Switches & Controls",
+      "marketplace_insights": {
+        "available": false,
+        "status": "not_attempted",
+        "used": false,
+        "search_total": 0,
+        "search_returned": 0,
+        "exact_match_count": 0,
+        "last_sold_date": ""
+      }
     },
     {
       "part_number": "90980-12345",
@@ -322,7 +384,14 @@
         "high_rate": 0.5,
         "basis": "non_japan_auto_parts_conservative",
         "confidence": "low",
-        "confirmation_required": true
+        "confirmation_required": true,
+        "screening_only": true,
+        "is_exact": false,
+        "requires_htsus": true,
+        "requires_origin_proof": true,
+        "requires_ddp_quote": true,
+        "de_minimis_exemption_assumed": false,
+        "last_verified": "2026-08-15"
       },
       "rakuten": {
         "enabled": true,
@@ -346,7 +415,16 @@
       "sales_observed_days_max": 13,
       "sales_short_history_listings": 0,
       "category_id": "33579",
-      "category_path": "eBay Motors > Parts & Accessories > Car & Truck Parts & Accessories > Interior Parts & Accessories > Switches & Controls"
+      "category_path": "eBay Motors > Parts & Accessories > Car & Truck Parts & Accessories > Interior Parts & Accessories > Switches & Controls",
+      "marketplace_insights": {
+        "available": false,
+        "status": "not_attempted",
+        "used": false,
+        "search_total": 0,
+        "search_returned": 0,
+        "exact_match_count": 0,
+        "last_sold_date": ""
+      }
     }
   ]
 }

@@ -35,6 +35,7 @@ const DEFAULT_SETTINGS = {
 };
 
 const QUALITY_LABELS = {
+  marketplace_insights_90d: "eBay公式・過去90日",
   observed_delta_30d: "自動差分・高精度",
   observed_delta: "自動差分",
   mixed_estimate: "掲載データ推定",
@@ -46,7 +47,7 @@ const QUALITY_LABELS = {
 };
 
 const SALES_CONFIDENCE_LABELS = {
-  confirmed: "実績入力済み",
+  confirmed: "公式実績・確認済み",
   high: "自動精度・高",
   medium: "自動精度・中",
   low: "自動精度・低",
@@ -77,7 +78,7 @@ const ORIGIN_LABELS = {
   "": "不明",
 };
 
-const CONFIRMED_SALES_QUALITIES = new Set(["product_research_csv", "product_research_manual"]);
+const CONFIRMED_SALES_QUALITIES = new Set(["marketplace_insights_90d", "product_research_csv", "product_research_manual"]);
 
 function loadJson(key, fallback) {
   if (typeof localStorage === "undefined") return structuredClone(fallback);
@@ -349,10 +350,10 @@ function inferBrand(title) {
 
 function tariffScenario(originCode) {
   const origin = String(originCode || "").toUpperCase();
-  if (origin === "JP") return { rate: 15, low: 15, high: 25, label: "日本原産基準" };
-  if (origin === "US") return { rate: 0, low: 0, high: 15, label: "米国原産仮定" };
-  if (origin) return { rate: 25, low: 15, high: 50, label: "保守的仮計算" };
-  return { rate: 25, low: 15, high: 50, label: "原産国不明" };
+  if (origin === "JP") return { rate: 15, low: 15, high: 25, label: "日本原産・関税仮置き" };
+  if (origin === "US") return { rate: 0, low: 0, high: 15, label: "米国原産・関税仮置き" };
+  if (origin) return { rate: 25, low: 15, high: 50, label: "他国原産・保守的仮置き" };
+  return { rate: 25, low: 15, high: 50, label: "原産国不明・保守的仮置き" };
 }
 
 function internationalFeeRate(monthlySalesUsd) {

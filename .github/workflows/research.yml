@@ -29,6 +29,8 @@ jobs:
       RAKUTEN_ACCESS_KEY: ${{ secrets.RAKUTEN_ACCESS_KEY }}
       EBAY_MARKETPLACE: EBAY_US
       EBAY_CATEGORY_ID: "6028"
+      # 承認済みならeBay公式90日成約APIを使用。未承認時は自動で日次差分へ切替。
+      ENABLE_MARKETPLACE_INSIGHTS: "true"
       RESEARCH_QUERY: ${{ github.event_name == 'workflow_dispatch' && inputs.query || '' }}
       QUERIES_PER_RUN: "8"
       MAX_DISCOVERY_ITEMS: "40"
@@ -82,17 +84,21 @@ jobs:
           path = Path("web/data/results.json")
           data = json.loads(path.read_text(encoding="utf-8"))
           assert data.get("schema_version") == 3
-          assert data.get("app_version") == "0.3.0"
+          assert data.get("app_version") == "0.3.1"
           assert isinstance(data.get("products"), list)
           assert isinstance(data.get("automation"), dict)
           assert isinstance(data.get("cost_defaults"), dict)
+          assert isinstance(data["automation"].get("marketplace_insights"), dict)
+          assert data["automation"].get("sales_source_priority") == ["marketplace_insights_90d", "daily_snapshot_delta"]
           assert data.get("generated_at")
           for product in data["products"]:
               assert product.get("part_number")
               assert "sales_confidence" in product
               assert "sales_tracked_listings" in product
               assert "sales_observed_delta" in product
+              assert "marketplace_insights" in product
               assert "tariff" in product
+              assert product["tariff"].get("screening_only") is True
               assert "auto_costs" in product
           print(f"validated: {len(data['products'])} products")
           PY
