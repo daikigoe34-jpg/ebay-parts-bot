@@ -1,0 +1,43 @@
+name: Apply Part Scout v0.3.0
+
+on:
+  push:
+    branches: ["agent/part-scout-auto-v0.3"]
+    paths:
+      - ".release/**"
+      - ".github/workflows/apply-v03.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: リポジトリを取得
+        uses: actions/checkout@v6
+        with:
+          ref: agent/part-scout-auto-v0.3
+          fetch-depth: 0
+
+      - name: v0.3.0ソースを適用
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/part-scout-release
+          mkdir -p /tmp/part-scout-release
+          cat .release/chunk-* | base64 --decode > /tmp/part-scout-v0.3.0.tar.gz
+          echo "d18f690b5104d3b42e5db130b16ae5b3801d00d9c183da7641ca9a41f6deb6dd  /tmp/part-scout-v0.3.0.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/part-scout-v0.3.0.tar.gz -C /tmp/part-scout-release
+          rsync -a --delete \
+            --exclude='.git/' \
+            --exclude='.release/' \
+            --exclude='.github/workflows/apply-v03.yml' \
+            /tmp/part-scout-release/ ./
+          rm -rf .release
+          rm -f .github/workflows/apply-v03.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Part Scout Mobile v0.3.0へ更新"
+          git push origin HEAD:agent/part-scout-auto-v0.3
