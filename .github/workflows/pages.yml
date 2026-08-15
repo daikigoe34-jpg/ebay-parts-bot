@@ -27,8 +27,10 @@ jobs:
       - name: リポジトリを取得
         uses: actions/checkout@v6
 
-      - name: Pagesを設定
+      - name: Pagesを設定・初回は自動有効化
         uses: actions/configure-pages@v6
+        with:
+          enablement: true
 
       - name: 公開ファイルをアップロード
         uses: actions/upload-pages-artifact@v5
