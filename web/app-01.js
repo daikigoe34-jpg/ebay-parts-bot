@@ -1,23 +1,32 @@
 "use strict";
 
 const STORAGE_KEYS = {
-  settings: "part-scout-settings-v2",
-  costs: "part-scout-costs-v1",
-  csvProducts: "part-scout-csv-products-v1",
+  settings: "part-scout-settings-v3",
+  legacySettings: "part-scout-settings-v2",
+  costs: "part-scout-costs-v2",
+  legacyCosts: "part-scout-costs-v1",
+  csvProducts: "part-scout-csv-products-v2",
+  legacyCsvProducts: "part-scout-csv-products-v1",
 };
 
 const DEFAULT_SETTINGS = {
+  sellerPlan: "no_store_or_starter",
+  monthlySalesUsd: 0,
+  autoExchangeRate: true,
   exchangeRate: 150,
-  ebayFeeRate: 13.6,
-  ebayFeeThresholdUsd: 7500,
-  ebayFeeAboveRate: 2.35,
-  internationalFeeRate: 1.35,
-  perOrderFeeUsd: 0.4,
   buyerSalesTaxRate: 7,
+  insertionFeeUsd: 0,
   promotedRate: 0,
-  fxSpreadRate: 2,
-  tariffRate: 15,
+  ebayFeeTaxRate: 10,
+  payoneerWithdrawalRate: 3,
+  payoneerFixedJpy: 0,
+  includePayoneerAnnualFee: true,
+  payoneerAnnualAllocationJpy: 0,
   returnReserveRate: 3,
+  additionalFvfRate: 0,
+  defaultInternationalShippingJpy: 2800,
+  defaultPackagingJpy: 150,
+  defaultDomesticShippingJpy: 800,
   minimumProfitJpy: 5000,
   minimumMarginRate: 25,
   minimumSold90d: 3,
@@ -26,16 +35,25 @@ const DEFAULT_SETTINGS = {
 };
 
 const QUALITY_LABELS = {
-  observed_delta: "日次差分から推定",
-  mixed_estimate: "出品サンプルの複数推定",
-  listing_lifetime_under_90d: "出品サンプルの掲載累計",
-  lifetime_velocity_estimate: "出品サンプルの掲載平均",
+  observed_delta_30d: "自動差分・高精度",
+  observed_delta: "自動差分",
+  mixed_estimate: "掲載データ推定",
+  listing_lifetime_under_90d: "掲載累計から推定",
+  lifetime_velocity_estimate: "掲載平均から推定",
   insufficient: "データ不足",
-  product_research_csv: "CSV実績",
-  product_research_manual: "Product Research手入力",
+  product_research_csv: "Product Research CSV",
+  product_research_manual: "Product Research確認済み",
 };
 
-const CONFIRMED_SALES_QUALITIES = new Set(["product_research_csv", "product_research_manual"]);
+const SALES_CONFIDENCE_LABELS = {
+  confirmed: "実績入力済み",
+  high: "自動精度・高",
+  medium: "自動精度・中",
+  low: "自動精度・低",
+  learning: "自動学習中",
+  unknown: "データ不足",
+};
+
 const COMPETITION_LABELS = {
   confirmed: "確認済み",
   high: "高",
@@ -44,33 +62,22 @@ const COMPETITION_LABELS = {
   unknown: "不明",
 };
 
-const state = {
-  apiPayload: null,
-  products: [],
-  settings: { ...structuredClone(DEFAULT_SETTINGS), ...loadJson(STORAGE_KEYS.settings, DEFAULT_SETTINGS) },
-  costs: loadJson(STORAGE_KEYS.costs, {}),
-  csvProducts: loadJson(STORAGE_KEYS.csvProducts, []),
-  filter: "",
-  sort: "score",
+const ORIGIN_LABELS = {
+  JP: "日本",
+  US: "米国",
+  CN: "中国",
+  KR: "韓国",
+  TW: "台湾",
+  TH: "タイ",
+  MX: "メキシコ",
+  CA: "カナダ",
+  DE: "ドイツ",
+  GB: "英国",
+  OTHER: "その他",
+  "": "不明",
 };
 
-const els = typeof document !== "undefined" ? {
-  runStatus: document.querySelector("#run-status"),
-  summaryCount: document.querySelector("#summary-count"),
-  summaryPromising: document.querySelector("#summary-promising"),
-  summaryQuery: document.querySelector("#summary-query"),
-  productList: document.querySelector("#product-list"),
-  emptyState: document.querySelector("#empty-state"),
-  filterInput: document.querySelector("#filter-input"),
-  sortSelect: document.querySelector("#sort-select"),
-  qualityNotice: document.querySelector("#data-quality-notice"),
-  template: document.querySelector("#product-card-template"),
-  settingsForm: document.querySelector("#settings-form"),
-  csvInput: document.querySelector("#csv-input"),
-  csvStatus: document.querySelector("#csv-status"),
-  manualForm: document.querySelector("#manual-research-form"),
-  manualStatus: document.querySelector("#manual-status"),
-} : {};
+const CONFIRMED_SALES_QUALITIES = new Set(["product_research_csv", "product_research_manual"]);
 
 function loadJson(key, fallback) {
   if (typeof localStorage === "undefined") return structuredClone(fallback);
@@ -85,6 +92,66 @@ function loadJson(key, fallback) {
 function saveJson(key, value) {
   if (typeof localStorage !== "undefined") localStorage.setItem(key, JSON.stringify(value));
 }
+
+function loadSettings() {
+  const legacy = loadJson(STORAGE_KEYS.legacySettings, {});
+  const current = loadJson(STORAGE_KEYS.settings, {});
+  const migrated = { ...DEFAULT_SETTINGS, ...legacy, ...current };
+  if (current.payoneerWithdrawalRate == null && legacy.fxSpreadRate != null) {
+    migrated.payoneerWithdrawalRate = Number(legacy.fxSpreadRate) || DEFAULT_SETTINGS.payoneerWithdrawalRate;
+  }
+  delete migrated.fxSpreadRate;
+  return migrated;
+}
+
+function loadCosts() {
+  const legacy = loadJson(STORAGE_KEYS.legacyCosts, {});
+  const current = loadJson(STORAGE_KEYS.costs, {});
+  return { ...legacy, ...current };
+}
+
+function loadCsvProducts() {
+  const legacy = loadJson(STORAGE_KEYS.legacyCsvProducts, []);
+  const current = loadJson(STORAGE_KEYS.csvProducts, []);
+  return current.length ? current : legacy;
+}
+
+const state = {
+  apiPayload: null,
+  products: [],
+  settings: loadSettings(),
+  costs: loadCosts(),
+  csvProducts: loadCsvProducts(),
+  filter: "",
+  sort: "profit",
+};
+
+const els = typeof document !== "undefined" ? {
+  runStatus: document.querySelector("#run-status"),
+  automationHealth: document.querySelector("#automation-health"),
+  flowResearch: document.querySelector("#flow-research"),
+  flowMarket: document.querySelector("#flow-market"),
+  flowProcurement: document.querySelector("#flow-procurement"),
+  summaryCount: document.querySelector("#summary-count"),
+  summaryVerified: document.querySelector("#summary-verified"),
+  summaryPromising: document.querySelector("#summary-promising"),
+  summaryQuery: document.querySelector("#summary-query"),
+  nextTaskTitle: document.querySelector("#next-task-title"),
+  nextTaskDetail: document.querySelector("#next-task-detail"),
+  topProductList: document.querySelector("#top-product-list"),
+  topEmptyState: document.querySelector("#top-empty-state"),
+  productList: document.querySelector("#product-list"),
+  emptyState: document.querySelector("#empty-state"),
+  filterInput: document.querySelector("#filter-input"),
+  sortSelect: document.querySelector("#sort-select"),
+  qualityNotice: document.querySelector("#data-quality-notice"),
+  template: document.querySelector("#product-card-template"),
+  settingsForm: document.querySelector("#settings-form"),
+  csvInput: document.querySelector("#csv-input"),
+  csvStatus: document.querySelector("#csv-status"),
+  manualForm: document.querySelector("#manual-research-form"),
+  manualStatus: document.querySelector("#manual-status"),
+} : {};
 
 function number(value, fallback = 0) {
   const parsed = Number(value);
@@ -157,6 +224,17 @@ function median(values) {
   if (!data.length) return 0;
   const middle = Math.floor(data.length / 2);
   return data.length % 2 ? data[middle] : (data[middle - 1] + data[middle]) / 2;
+}
+
+function percentile(values, p) {
+  const data = values.map(Number).filter(Number.isFinite).sort((a, b) => a - b);
+  if (!data.length) return 0;
+  if (data.length === 1) return data[0];
+  const index = (data.length - 1) * p;
+  const lower = Math.floor(index);
+  const upper = Math.ceil(index);
+  if (lower === upper) return data[lower];
+  return data[lower] * (upper - index) + data[upper] * (index - lower);
 }
 
 function marketScore(sold, competition, prices) {
@@ -238,10 +316,7 @@ function parseCsv(text) {
 }
 
 function normalizeHeader(value) {
-  return String(value || "")
-    .replace(/^\uFEFF/, "")
-    .toLowerCase()
-    .replace(/[\s_\-\/()（）・:：]+/g, "");
+  return String(value || "").replace(/^\uFEFF/, "").toLowerCase().replace(/[\s_\-\/()（）・:：]+/g, "");
 }
 
 function findHeader(headers, candidates) {
@@ -254,8 +329,7 @@ function findHeader(headers, candidates) {
 }
 
 function parsePrice(value) {
-  const cleaned = String(value || "").replace(/[^0-9.\-]/g, "");
-  return number(cleaned, 0);
+  return number(String(value || "").replace(/[^0-9.\-]/g, ""), 0);
 }
 
 function parseDate(value) {
@@ -273,6 +347,47 @@ function inferBrand(title) {
   return Object.entries(brands).find(([key]) => upper.includes(key))?.[1] || "Unknown";
 }
 
+function tariffScenario(originCode) {
+  const origin = String(originCode || "").toUpperCase();
+  if (origin === "JP") return { rate: 15, low: 15, high: 25, label: "日本原産基準" };
+  if (origin === "US") return { rate: 0, low: 0, high: 15, label: "米国原産仮定" };
+  if (origin) return { rate: 25, low: 15, high: 50, label: "保守的仮計算" };
+  return { rate: 25, low: 15, high: 50, label: "原産国不明" };
+}
+
+function internationalFeeRate(monthlySalesUsd) {
+  const sales = Math.max(0, number(monthlySalesUsd));
+  if (sales >= 100000) return 0.4;
+  if (sales >= 50000) return 0.7;
+  if (sales >= 10000) return 0.95;
+  if (sales >= 3000) return 1.2;
+  return 1.35;
+}
+
+function feeProfile(settings = state.settings, product = {}) {
+  if (settings.sellerPlan !== "basic_plus") {
+    return { rate: 13.6, thresholdUsd: 7500, aboveRate: 2.35, label: "ストアなし／Starter・標準P&A" };
+  }
+
+  const categoryPath = String(product.category_path || product.categoryPath || "").toLowerCase();
+  if (categoryPath.includes("wheels, tires & parts > tires")
+      || categoryPath.includes("trailer tires & wheels > tires")
+      || categoryPath.includes("aircraft tires & tubes")) {
+    return { rate: 9.5, thresholdUsd: 1000, aboveRate: 2.35, label: "Basic以上・タイヤ" };
+  }
+  if (categoryPath.includes("apparel, protective gear & merchandise")) {
+    return { rate: 12.7, thresholdUsd: 1000, aboveRate: 2.35, label: "Basic以上・アパレル等" };
+  }
+  if (categoryPath.includes("in-car technology, gps & security")) {
+    return { rate: 9.35, thresholdUsd: 1000, aboveRate: 2.35, label: "Basic以上・車載テック" };
+  }
+  return { rate: 11.5, thresholdUsd: 1000, aboveRate: 2.35, label: "Basic以上・標準P&A" };
+}
+
+function isSalesAutoVerified(product) {
+  return product.sales_auto_verified === true || CONFIRMED_SALES_QUALITIES.has(product.sales_quality);
+}
+
 function createManualResearchProduct(values) {
   const part = normalizePartNumber(values.partNumber);
   if (!isPlausiblePartNumber(part)) throw new Error("品番の形式を確認してください。");
@@ -280,17 +395,23 @@ function createManualResearchProduct(values) {
   const active = Math.max(0, Math.round(number(values.activeCompetition)));
   const price = Math.max(0, number(values.medianPriceUsd));
   if (price <= 0) throw new Error("成約価格を入力してください。");
-  const title = String(values.title || "").trim();
   const existing = (state.apiPayload?.products || []).find((product) => product.part_number === part) || {};
+  const suppliedTitle = String(values.title || "").trim();
+  const title = suppliedTitle || existing.title || `${part} auto part`;
   const score = marketScore(sold, active, [price]);
   return {
     ...existing,
     part_number: part,
-    title: title || existing.title || `${part} auto part`,
+    title,
     brand: existing.brand || inferBrand(title),
     sold_90d_est: sold,
+    sold_90d_low: sold,
+    sold_90d_high: sold,
     sales_quality: "product_research_manual",
+    sales_confidence: "confirmed",
+    sales_observed_days: 90,
     sales_scope: "product_research_90d",
+    sales_auto_verified: true,
     sales_confirmation_required: false,
     sampled_listings: sold,
     sampled_sellers: Math.max(0, Math.round(number(values.sellerCount))),

@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       query:
-        description: "任意の検索語。空欄ならメーカー・純正・小型部品をランダム選択"
+        description: "任意の検索語。空欄なら検索語を自動ローテーション"
         required: false
         type: string
   schedule:
@@ -24,17 +24,25 @@ jobs:
     env:
       EBAY_CLIENT_ID: ${{ secrets.EBAY_CLIENT_ID }}
       EBAY_CLIENT_SECRET: ${{ secrets.EBAY_CLIENT_SECRET }}
+      # 任意。設定すると楽天の品番一致商品と仕入価格を自動取得します。
+      RAKUTEN_APPLICATION_ID: ${{ secrets.RAKUTEN_APPLICATION_ID }}
+      RAKUTEN_ACCESS_KEY: ${{ secrets.RAKUTEN_ACCESS_KEY }}
       EBAY_MARKETPLACE: EBAY_US
       EBAY_CATEGORY_ID: "6028"
       RESEARCH_QUERY: ${{ github.event_name == 'workflow_dispatch' && inputs.query || '' }}
-      MAX_DISCOVERY_ITEMS: "50"
-      MAX_CANDIDATES: "15"
-      MAX_EXACT_DETAILS: "15"
+      QUERIES_PER_RUN: "8"
+      MAX_DISCOVERY_ITEMS: "40"
+      MAX_DISCOVERY_DETAILS: "20"
+      MAX_CANDIDATES: "24"
+      MAX_EXACT_DETAILS: "50"
+      DEFAULT_INTL_SHIPPING_JPY: "2800"
+      FALLBACK_USDJPY: "150"
     steps:
       - name: リポジトリを取得
         uses: actions/checkout@v6
         with:
           ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
 
       - name: Pythonを準備
         uses: actions/setup-python@v6
@@ -51,10 +59,18 @@ jobs:
       - name: JavaScript自動テスト
         run: node tests/web_core.test.cjs
 
-      - name: JavaScript構文検証
-        run: node --check web/app.js
+      - name: 構文・JSON検証
+        run: |
+          python -m py_compile scripts/core.py scripts/research.py
+          node --check web/app-01.js
+          node --check web/app-02.js
+          node --check web/app-03.js
+          node --check web/app.js
+          node --check web/sw.js
+          python -m json.tool web/manifest.webmanifest >/dev/null
+          python -m json.tool config/search_seeds.json >/dev/null
 
-      - name: eBayを調査
+      - name: eBay・楽天・為替を自動調査
         run: python scripts/research.py
 
       - name: 出力JSONを検証
@@ -65,22 +81,38 @@ jobs:
 
           path = Path("web/data/results.json")
           data = json.loads(path.read_text(encoding="utf-8"))
-          assert data.get("schema_version") == 2
+          assert data.get("schema_version") == 3
+          assert data.get("app_version") == "0.3.0"
           assert isinstance(data.get("products"), list)
+          assert isinstance(data.get("automation"), dict)
+          assert isinstance(data.get("cost_defaults"), dict)
           assert data.get("generated_at")
+          for product in data["products"]:
+              assert product.get("part_number")
+              assert "sales_confidence" in product
+              assert "sales_tracked_listings" in product
+              assert "sales_observed_delta" in product
+              assert "tariff" in product
+              assert "auto_costs" in product
           print(f"validated: {len(data['products'])} products")
           PY
 
-      - name: 調査結果をmainへ保存
+      - name: 調査結果と学習状態をmainへ保存
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add web/data/results.json state/snapshots.json
+          git add \
+            web/data/results.json \
+            state/snapshots.json \
+            state/watchlist.json \
+            state/research_state.json
           if git diff --cached --quiet; then
             echo "保存対象の差分はありません。"
             exit 0
           fi
-          git commit -m "data: eBay調査結果を更新"
+          git commit -m "data: eBay自動調査と販売差分を更新"
+          # Pages設定等の別コミットが先に入っても、履歴を壊さず追従します。
+          git pull --rebase origin "${{ github.event.repository.default_branch }}"
           git push origin "HEAD:${{ github.event.repository.default_branch }}"

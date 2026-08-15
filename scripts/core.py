@@ -35,15 +35,51 @@ ASPECT_PART_KEYS = {
     "other part number",
 }
 
+ASPECT_ORIGIN_KEYS = {
+    "country/region of manufacture",
+    "country of origin",
+    "country/region of origin",
+    "origin",
+    "manufacturing country and region",
+}
+
+COUNTRY_ALIASES = {
+    "JAPAN": "JP",
+    "JP": "JP",
+    "JPN": "JP",
+    "日本": "JP",
+    "UNITED STATES": "US",
+    "UNITED STATES OF AMERICA": "US",
+    "USA": "US",
+    "U.S.A.": "US",
+    "US": "US",
+    "CHINA": "CN",
+    "MAINLAND CHINA": "CN",
+    "CN": "CN",
+    "KOREA": "KR",
+    "SOUTH KOREA": "KR",
+    "REPUBLIC OF KOREA": "KR",
+    "KR": "KR",
+    "TAIWAN": "TW",
+    "TW": "TW",
+    "THAILAND": "TH",
+    "TH": "TH",
+    "MEXICO": "MX",
+    "MX": "MX",
+    "CANADA": "CA",
+    "CA": "CA",
+    "GERMANY": "DE",
+    "DE": "DE",
+    "UNITED KINGDOM": "GB",
+    "UK": "GB",
+    "GB": "GB",
+}
+
 # OEM-style identifiers seen in Japanese auto parts.
 PART_PATTERNS = [
-    # Toyota/Nissan and similar 5-5 or 5-4-2 numeric/alphanumeric structures.
     re.compile(r"(?<![A-Z0-9])\d{5}-[A-Z0-9]{4,6}(?:-[A-Z0-9]{1,4})?(?![A-Z0-9])"),
-    # Honda-like 5-3-3.
     re.compile(r"(?<![A-Z0-9])\d{5}-[A-Z0-9]{3}-[A-Z0-9]{3}(?![A-Z0-9])"),
-    # Mazda/Ford/general hyphenated alphanumeric identifiers.
     re.compile(r"(?<![A-Z0-9])[A-Z0-9]{2,7}(?:-[A-Z0-9]{2,8}){1,3}(?![A-Z0-9])"),
-    # Subaru-style compact identifiers, Mitsubishi MR/MB etc.
     re.compile(r"(?<![A-Z0-9])(?:[A-Z]{1,4}\d{5,10}[A-Z0-9]{0,4}|\d{4,7}[A-Z]{1,4}\d{2,7})(?![A-Z0-9])"),
 ]
 
@@ -79,12 +115,9 @@ def is_plausible_part_number(value: str) -> bool:
         return False
     if not any(ch.isdigit() for ch in value):
         return False
-    # Numeric-only identifiers are accepted only with a common OEM-style split.
     if not any(ch.isalpha() for ch in value):
         if not re.fullmatch(r"\d{5}-\d{4,6}(?:-\d{1,4})?", value):
             return False
-    if any(token == value for token in NOISE_TOKENS):
-        return False
     return True
 
 
@@ -115,17 +148,90 @@ def extract_part_numbers_from_text(text: Any) -> list[str]:
 def extract_part_numbers(item: Mapping[str, Any]) -> list[str]:
     """Extract part numbers, preferring structured eBay aspects over title text."""
     aspect_candidates: list[str] = []
+    compact_keys = {re.sub(r"[^a-z0-9]", "", key) for key in ASPECT_PART_KEYS}
     for aspect in item.get("localizedAspects") or []:
         name = normalize_text(aspect.get("name", "")).lower()
         compact_name = re.sub(r"[^a-z0-9]", "", name)
-        if name in ASPECT_PART_KEYS or compact_name in {
-            re.sub(r"[^a-z0-9]", "", key) for key in ASPECT_PART_KEYS
-        }:
+        if name in ASPECT_PART_KEYS or compact_name in compact_keys:
             aspect_candidates.extend(split_aspect_values(aspect.get("value", "")))
     aspect_candidates = dedupe(aspect_candidates)
     if aspect_candidates:
         return aspect_candidates[:6]
     return extract_part_numbers_from_text(item.get("title", ""))[:6]
+
+
+def normalize_country(value: Any) -> str:
+    text = normalize_text(value)
+    text = re.sub(r"\s*\([^)]*\)\s*", " ", text).strip()
+    if text in COUNTRY_ALIASES:
+        return COUNTRY_ALIASES[text]
+    for alias, code in COUNTRY_ALIASES.items():
+        if alias and alias in text:
+            return code
+    if re.fullmatch(r"[A-Z]{2}", text):
+        return text
+    return ""
+
+
+def extract_country_of_origin(item: Mapping[str, Any]) -> tuple[str, str]:
+    """Return ISO-like origin code and confidence from structured item aspects.
+
+    Seller/item location is intentionally ignored because it is not country of origin.
+    """
+    compact_keys = {re.sub(r"[^a-z0-9]", "", key) for key in ASPECT_ORIGIN_KEYS}
+    for aspect in item.get("localizedAspects") or []:
+        name = normalize_text(aspect.get("name", "")).lower()
+        compact_name = re.sub(r"[^a-z0-9]", "", name)
+        if name in ASPECT_ORIGIN_KEYS or compact_name in compact_keys:
+            code = normalize_country(aspect.get("value"))
+            if code:
+                return code, "aspect"
+    return "", "unknown"
+
+
+def tariff_scenario(origin_code: str) -> dict[str, Any]:
+    """Conservative screening scenario, not an HTSUS determination.
+
+    Japan-origin auto parts are screened at a 15% total duty baseline. Unknown or
+    other origins are screened at 25% and require HTS/origin confirmation before a
+    final buy decision. US-origin goods are screened at 0% but still require proof.
+    """
+    origin = normalize_country(origin_code)
+    if origin == "JP":
+        return {
+            "rate": 0.15,
+            "low_rate": 0.15,
+            "high_rate": 0.25,
+            "basis": "japan_auto_parts_15pct_baseline",
+            "confidence": "medium",
+            "confirmation_required": True,
+        }
+    if origin == "US":
+        return {
+            "rate": 0.0,
+            "low_rate": 0.0,
+            "high_rate": 0.15,
+            "basis": "us_origin_return_assumption",
+            "confidence": "low",
+            "confirmation_required": True,
+        }
+    if origin:
+        return {
+            "rate": 0.25,
+            "low_rate": 0.15,
+            "high_rate": 0.50,
+            "basis": "non_japan_auto_parts_conservative",
+            "confidence": "low",
+            "confirmation_required": True,
+        }
+    return {
+        "rate": 0.25,
+        "low_rate": 0.15,
+        "high_rate": 0.50,
+        "basis": "unknown_origin_conservative",
+        "confidence": "unknown",
+        "confirmation_required": True,
+    }
 
 
 def dedupe(values: Iterable[str]) -> list[str]:
@@ -153,9 +259,10 @@ def parse_iso8601(value: Any) -> datetime | None:
 
 def safe_float(value: Any, default: float = 0.0) -> float:
     try:
-        return float(value)
+        result = float(value)
     except (TypeError, ValueError):
         return default
+    return result if math.isfinite(result) else default
 
 
 def sold_quantity(item: Mapping[str, Any]) -> int:
@@ -170,14 +277,26 @@ def sold_quantity(item: Mapping[str, Any]) -> int:
     return max(quantities, default=0)
 
 
-def estimate_90d_sold(
+def count_rate_interval(delta: float, days: float) -> tuple[float, float]:
+    """Return a deliberately wide screening interval for a 90-day count rate."""
+    days = max(days, 0.01)
+    estimate = max(delta, 0.0) / days * 90
+    if delta <= 0:
+        return 0.0, round(3.0 / days * 90, 2)
+    spread = 1.96 * math.sqrt(delta + 1.0) / days * 90
+    return round(max(0.0, estimate - spread), 2), round(estimate + spread, 2)
+
+
+def estimate_sales_pace(
     item: Mapping[str, Any],
     history: Sequence[Mapping[str, Any]] | None,
     now: datetime | None = None,
-) -> tuple[float, str]:
-    """Estimate 90-day units from snapshots, otherwise lifetime velocity.
+) -> dict[str, Any]:
+    """Estimate a 90-day sales *pace* for one currently active listing.
 
-    Returns (estimated_units_90d, quality_label).
+    This is not historical completed-listing data. Snapshot deltas are preferred.
+    A minimum of seven observed days is required before annualizing a delta; shorter
+    histories remain in learning mode to avoid explosive one-day extrapolation.
     """
     now = now or datetime.now(timezone.utc)
     current_qty = sold_quantity(item)
@@ -194,26 +313,66 @@ def estimate_90d_sold(
             qty = max(0, int(row.get("sold_quantity", 0)))
         except (TypeError, ValueError):
             continue
-        if 0 < (now - dt).total_seconds() <= 95 * 86400:
+        age_seconds = (now - dt).total_seconds()
+        if 0 < age_seconds <= 100 * 86400:
             usable.append((dt, qty))
 
     usable.sort(key=lambda pair: pair[0])
     if usable:
         earliest_dt, earliest_qty = usable[0]
-        days = max((now - earliest_dt).total_seconds() / 86400, 0.01)
+        observed_days = max((now - earliest_dt).total_seconds() / 86400, 0.01)
         delta = current_qty - earliest_qty
-        if days >= 2 and delta >= 0:
-            return round(delta / days * 90, 2), "observed_delta"
+        if observed_days >= 7 and delta >= 0:
+            estimate = round(delta / observed_days * 90, 2)
+            low, high = count_rate_interval(delta, observed_days)
+            confidence = "high" if observed_days >= 30 else "medium" if observed_days >= 14 else "low"
+            quality = "observed_delta_30d" if observed_days >= 30 else "observed_delta"
+            return {
+                "estimate": estimate,
+                "low": low,
+                "high": high,
+                "quality": quality,
+                "confidence": confidence,
+                "observed_days": round(observed_days, 1),
+                "observed_delta": delta,
+                "auto_verified": observed_days >= 30,
+            }
 
     created = parse_iso8601(item.get("itemCreationDate") or item.get("itemStartDate"))
     if created and current_qty > 0:
         age_days = max((now - created).total_seconds() / 86400, 1.0)
-        # For young listings, current sold quantity is already within 90 days.
-        if age_days <= 90:
-            return float(current_qty), "listing_lifetime_under_90d"
-        return round(current_qty / age_days * 90, 2), "lifetime_velocity_estimate"
+        estimate = float(current_qty) if age_days <= 90 else round(current_qty / age_days * 90, 2)
+        return {
+            "estimate": estimate,
+            "low": 0.0,
+            "high": round(max(estimate * 2.0, estimate + 3.0), 2),
+            "quality": "listing_lifetime_under_90d" if age_days <= 90 else "lifetime_velocity_estimate",
+            "confidence": "learning",
+            "observed_days": round(min(age_days, 90), 1),
+            "observed_delta": 0,
+            "auto_verified": False,
+        }
 
-    return 0.0, "insufficient"
+    return {
+        "estimate": 0.0,
+        "low": 0.0,
+        "high": 0.0,
+        "quality": "insufficient",
+        "confidence": "unknown",
+        "observed_days": 0.0,
+        "observed_delta": 0,
+        "auto_verified": False,
+    }
+
+
+def estimate_90d_sold(
+    item: Mapping[str, Any],
+    history: Sequence[Mapping[str, Any]] | None,
+    now: datetime | None = None,
+) -> tuple[float, str]:
+    """Backward-compatible wrapper returning estimate and quality label."""
+    result = estimate_sales_pace(item, history, now=now)
+    return float(result["estimate"]), str(result["quality"])
 
 
 def median(values: Sequence[float]) -> float:
@@ -242,16 +401,7 @@ def estimate_competition(
     matched_count: Any,
     observed_details_count: Any = 0,
 ) -> dict[str, Any]:
-    """Estimate relevant active listings from a noisy exact-keyword search.
-
-    eBay's search ``total`` is the number of keyword matches, not necessarily
-    the number of listings for the same OEM part.  We therefore estimate the
-    relevant total from the share of the returned sample whose title contains
-    the normalized part number.  The confidence label is deliberately strict
-    so the UI does not present a precise-looking competition count when the
-    evidence is weak.
-    """
-
+    """Estimate relevant active listings from a noisy exact-keyword search."""
     total = max(0, int(safe_float(total_results, 0)))
     returned = max(0, int(safe_float(returned_count, 0)))
     matched = max(0, int(safe_float(matched_count, 0)))
@@ -274,9 +424,9 @@ def estimate_competition(
     match_rate = matched / returned
     estimated = max(observed, matched, round(total * match_rate))
 
-    if returned >= 20 and matched >= 10 and match_rate >= 0.80:
+    if returned >= 50 and matched >= 25 and match_rate >= 0.80:
         confidence = "high"
-    elif returned >= 10 and matched >= 5 and match_rate >= 0.50:
+    elif returned >= 20 and matched >= 10 and match_rate >= 0.50:
         confidence = "medium"
     else:
         confidence = "low"
@@ -316,9 +466,11 @@ def market_score(sold_90d: float, active_count: int, prices: Sequence[float]) ->
     return max(0, min(100, round(demand_points + ratio_points + competition_points + price_points)))
 
 
-def market_judgment(score: int, sold_90d: float, active_count: int, quality: str) -> str:
+def market_judgment(score: int, sold_90d: float, active_count: int, quality: str, confidence: str = "") -> str:
     if quality == "insufficient" or sold_90d < 1:
         return "データ不足"
+    if confidence in {"unknown", "learning", "low"}:
+        return "学習中"
     if score >= 72 and sold_90d >= 5 and active_count <= 80:
         return "有望"
     if score >= 55 and sold_90d >= 2:
@@ -326,6 +478,20 @@ def market_judgment(score: int, sold_90d: float, active_count: int, quality: str
     if score >= 40:
         return "監視"
     return "見送り"
+
+
+def international_fee_rate(monthly_sales_usd: float) -> float:
+    """Japan seller international fee after published volume discounts."""
+    sales = max(0.0, safe_float(monthly_sales_usd, 0.0))
+    if sales >= 100_000:
+        return 0.0040
+    if sales >= 50_000:
+        return 0.0070
+    if sales >= 10_000:
+        return 0.0095
+    if sales >= 3_000:
+        return 0.0120
+    return 0.0135
 
 
 @dataclass(frozen=True)
@@ -343,11 +509,18 @@ class ProfitInputs:
     ebay_fee_above_rate: float = 0.0235
     international_fee_rate: float = 0.0135
     promoted_listing_rate: float = 0.0
-    fx_spread_rate: float = 0.02
+    ebay_fee_tax_rate: float = 0.10
+    payoneer_withdrawal_rate: float = 0.03
+    payoneer_fixed_jpy: float = 0.0
+    payoneer_annual_allocation_jpy: float = 0.0
+    # Deprecated compatibility field. New callers should use payoneer_withdrawal_rate.
+    fx_spread_rate: float = 0.0
     tariff_rate: float = 0.15
     return_reserve_rate: float = 0.03
     per_order_fee_usd: float = 0.40
     buyer_sales_tax_rate: float = 0.07
+    insertion_fee_usd: float = 0.0
+    additional_final_value_fee_rate: float = 0.0
 
 
 def calculate_profit(inputs: ProfitInputs) -> dict[str, float | str]:
@@ -360,27 +533,31 @@ def calculate_profit(inputs: ProfitInputs) -> dict[str, float | str]:
     fee_threshold = max(inputs.ebay_fee_threshold_usd, 0.0)
     lower_fee_base = min(fee_base_usd, fee_threshold) if fee_threshold else 0.0
     upper_fee_base = max(fee_base_usd - fee_threshold, 0.0) if fee_threshold else fee_base_usd
-    percentage_fee_usd = (
-        lower_fee_base * inputs.ebay_fee_rate
-        + upper_fee_base * inputs.ebay_fee_above_rate
-    )
+    percentage_fee_usd = lower_fee_base * inputs.ebay_fee_rate + upper_fee_base * inputs.ebay_fee_above_rate
+    percentage_fee_usd += fee_base_usd * max(inputs.additional_final_value_fee_rate, 0.0)
     per_order_fee_usd = 0.30 if fee_base_usd <= 10 else inputs.per_order_fee_usd
-    ebay_fee_jpy = (percentage_fee_usd + per_order_fee_usd) * inputs.exchange_rate
+    final_value_fee_jpy = (percentage_fee_usd + per_order_fee_usd) * inputs.exchange_rate
     international_fee_jpy = fee_base_usd * inputs.international_fee_rate * inputs.exchange_rate
     promoted_fee_jpy = fee_base_usd * inputs.promoted_listing_rate * inputs.exchange_rate
-    fx_cost_jpy = gross_jpy * inputs.fx_spread_rate
-    # The declared customs value is modeled as item price only; shipping can be added manually via customs_fixed_jpy if needed.
-    tariff_jpy = item_revenue_jpy * inputs.tariff_rate
-    return_reserve_jpy = gross_jpy * inputs.return_reserve_rate
+    insertion_fee_jpy = max(inputs.insertion_fee_usd, 0.0) * inputs.exchange_rate
 
-    variable_costs = (
-        ebay_fee_jpy
-        + international_fee_jpy
-        + promoted_fee_jpy
-        + fx_cost_jpy
-        + tariff_jpy
-        + return_reserve_jpy
+    ebay_service_fees_before_tax = final_value_fee_jpy + international_fee_jpy + promoted_fee_jpy + insertion_fee_jpy
+    ebay_fee_tax_jpy = ebay_service_fees_before_tax * max(inputs.ebay_fee_tax_rate, 0.0)
+    ebay_fees_total_jpy = ebay_service_fees_before_tax + ebay_fee_tax_jpy
+
+    payout_before_payoneer_jpy = max(0.0, gross_jpy - ebay_fees_total_jpy)
+    payoneer_rate = max(inputs.payoneer_withdrawal_rate, inputs.fx_spread_rate, 0.0)
+    payoneer_fee_jpy = (
+        payout_before_payoneer_jpy * payoneer_rate
+        + max(inputs.payoneer_fixed_jpy, 0.0)
+        + max(inputs.payoneer_annual_allocation_jpy, 0.0)
     )
+
+    # Screening customs value: merchandise price only. Exact DDP quote supersedes this.
+    tariff_jpy = item_revenue_jpy * max(inputs.tariff_rate, 0.0)
+    return_reserve_jpy = gross_jpy * max(inputs.return_reserve_rate, 0.0)
+
+    variable_costs = ebay_fees_total_jpy + payoneer_fee_jpy + tariff_jpy + return_reserve_jpy
     fixed_costs = (
         inputs.procurement_jpy
         + inputs.domestic_shipping_jpy
@@ -393,7 +570,7 @@ def calculate_profit(inputs: ProfitInputs) -> dict[str, float | str]:
     margin = profit_jpy / gross_jpy if gross_jpy else 0.0
 
     if inputs.procurement_jpy <= 0 or inputs.international_shipping_jpy <= 0:
-        judgment = "仕入・送料未入力"
+        judgment = "仕入・送料未確認"
     elif profit_jpy >= 5000 and margin >= 0.25:
         judgment = "販売候補"
     elif profit_jpy >= 3000 and margin >= 0.18:
@@ -406,10 +583,16 @@ def calculate_profit(inputs: ProfitInputs) -> dict[str, float | str]:
     return {
         "gross_jpy": round(gross_jpy),
         "buyer_sales_tax_usd": round(buyer_sales_tax_usd, 2),
-        "ebay_fee_jpy": round(ebay_fee_jpy),
+        "fee_base_usd": round(fee_base_usd, 2),
+        "final_value_fee_jpy": round(final_value_fee_jpy),
         "international_fee_jpy": round(international_fee_jpy),
         "promoted_fee_jpy": round(promoted_fee_jpy),
-        "fx_cost_jpy": round(fx_cost_jpy),
+        "insertion_fee_jpy": round(insertion_fee_jpy),
+        "ebay_fee_tax_jpy": round(ebay_fee_tax_jpy),
+        "ebay_fee_jpy": round(ebay_fees_total_jpy),
+        "payoneer_fee_jpy": round(payoneer_fee_jpy),
+        # Kept for older callers that displayed fx_cost_jpy.
+        "fx_cost_jpy": round(payoneer_fee_jpy),
         "tariff_jpy": round(tariff_jpy),
         "return_reserve_jpy": round(return_reserve_jpy),
         "fixed_costs_jpy": round(fixed_costs),
