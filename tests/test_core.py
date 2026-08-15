@@ -14,9 +14,14 @@ from scripts.core import (
     tariff_scenario,
 )
 from scripts.research import (
-    EbayMarketplaceInsightsClient,
+    EbayApiError,
     aggregate_sales_estimate,
-    summarize_marketplace_insights,
+    build_status_payload,
+    classify_ebay_error,
+    ebay_api_health,
+    merge_watchlist,
+    research_run_status,
+    should_preserve_previous_results,
 )
 
 
@@ -72,7 +77,7 @@ def test_short_snapshot_history_is_not_explosively_annualized():
         }
     ]
     details = estimate_sales_pace(item, history, now=now)
-    assert details["quality"] == "insufficient"
+    assert details["quality"] == "learning_baseline"
     assert details["estimate"] == 0
     assert details["auto_verified"] is False
 
@@ -320,66 +325,6 @@ def test_query_rotation_advances_without_random_repeats():
     assert state["query_cursor"] == 0
 
 
-def test_marketplace_insights_aggregates_exact_90d_sales_and_prices():
-    rows = [
-        {
-            "itemId": "sold-1",
-            "title": "Nissan Genuine Switch 25550-5SA0A",
-            "totalSoldQuantity": 4,
-            "lastSoldPrice": {"value": "82.50", "currency": "USD"},
-            "lastSoldDate": "2026-08-10T00:00:00.000Z",
-            "seller": {"username": "seller-a"},
-        },
-        {
-            "itemId": "sold-2",
-            "title": "OEM 255505SA0A Nissan switch",
-            "totalSoldQuantity": "3",
-            "lastSoldPrice": {"value": "90", "currency": "USD"},
-            "seller": {"username": "seller-b"},
-        },
-        # Duplicate item IDs must not be double-counted. Keep the larger quantity.
-        {
-            "itemId": "sold-2",
-            "title": "OEM 25550-5SA0A Nissan switch",
-            "totalSoldQuantity": 2,
-            "lastSoldPrice": {"value": "88", "currency": "USD"},
-        },
-        {
-            "itemId": "noise",
-            "title": "Nissan generic switch",
-            "totalSoldQuantity": 100,
-            "lastSoldPrice": {"value": "10", "currency": "USD"},
-        },
-    ]
-    result = summarize_marketplace_insights("25550-5SA0A", rows, search_total=4)
-    assert result["usable"] is True
-    assert result["quality"] == "marketplace_insights_90d"
-    assert result["confidence"] == "confirmed"
-    assert result["estimate"] == 7
-    assert result["low"] == 7
-    assert result["high"] == 7
-    assert result["exact_match_count"] == 2
-    assert result["prices_usd"] == [82.5, 90.0]
-    assert result["seller_count"] == 2
-
-
-def test_marketplace_insights_successful_zero_is_confirmed_zero():
-    result = summarize_marketplace_insights("25550-5SA0A", [], search_total=0)
-    assert result["usable"] is True
-    assert result["confidence"] == "confirmed"
-    assert result["estimate"] == 0
-
-
-def test_marketplace_insights_no_exact_title_match_falls_back():
-    result = summarize_marketplace_insights(
-        "25550-5SA0A",
-        [{"itemId": "noise", "title": "Nissan generic switch", "totalSoldQuantity": 50}],
-        search_total=1,
-    )
-    assert result["usable"] is False
-    assert result["quality"] == "marketplace_insights_no_exact_match"
-
-
 def test_tariff_scenario_is_explicitly_screening_only():
     scenario = tariff_scenario("JP")
     assert scenario["rate"] == 0.15
@@ -390,36 +335,167 @@ def test_tariff_scenario_is_explicitly_screening_only():
     assert scenario["de_minimis_exemption_assumed"] is False
 
 
-def test_marketplace_insights_access_denial_disables_further_calls():
-    class Response:
-        status_code = 403
-        text = "restricted API"
 
-        @staticmethod
-        def json():
-            return {}
 
-    class Session:
-        def __init__(self):
-            self.calls = 0
+def test_listing_lifetime_quantity_is_not_used_as_90_day_sales():
+    now = datetime(2026, 8, 15, tzinfo=timezone.utc)
+    item = {
+        "itemId": "new-listing",
+        "itemCreationDate": (now - timedelta(days=3)).isoformat(),
+        "estimatedAvailabilities": [{"estimatedSoldQuantity": 25}],
+    }
+    result = estimate_sales_pace(item, [], now=now)
+    assert result["estimate"] == 0
+    assert result["quality"] == "learning_baseline"
+    assert result["confidence"] == "learning"
+    assert result["lifetime_sold_signal"] == 25
 
-        def get(self, *args, **kwargs):
-            self.calls += 1
-            return Response()
 
-    class Browse:
-        def __init__(self):
-            self.session = Session()
-            self.token = "token"
-            self.marketplace = "EBAY_US"
+def test_part_level_first_week_is_learning_without_fake_90_day_number():
+    now = datetime(2026, 8, 15, tzinfo=timezone.utc)
+    part = "25550-5SA0A"
+    item = {
+        "itemId": "short",
+        "estimatedAvailabilities": [{"estimatedSoldQuantity": 12}],
+    }
+    snapshots = {
+        "short": [{
+            "item_id": "short",
+            "part_numbers": [part],
+            "observed_at": (now - timedelta(days=3)).isoformat(),
+            "sold_quantity": 10,
+        }]
+    }
+    result = aggregate_sales_estimate(part, [item], snapshots, now)
+    assert result["estimate"] == 0
+    assert result["quality"] == "learning_baseline"
+    assert result["confidence"] == "learning"
+    assert result["days_until_usable"] == 4.0
+    assert result["lifetime_sold_signal"] == 12
 
-    browse = Browse()
-    client = EbayMarketplaceInsightsClient(browse)
-    first = client.search_part("25550-5SA0A", datetime(2026, 8, 15, tzinfo=timezone.utc))
-    second = client.search_part("90915-YZZF2", datetime(2026, 8, 15, tzinfo=timezone.utc))
 
-    assert first["available"] is False
-    assert first["status"] == "not_approved"
-    assert second["status"] == "not_approved"
-    assert browse.session.calls == 1
-    assert client.summary()["fallback_method"] == "daily_snapshot_delta"
+def test_ebay_error_classification_distinguishes_browse_approval_from_bad_keys():
+    oauth = EbayApiError("bad credentials", status_code=401, stage="oauth")
+    browse = EbayApiError("restricted", status_code=403, stage="browse_search")
+    assert classify_ebay_error(oauth) == "invalid_credentials"
+    assert classify_ebay_error(browse) == "browse_not_approved"
+
+
+def test_api_health_gives_exact_next_action():
+    missing = ebay_api_health(credentials_configured=False, checked_at=datetime(2026, 8, 15, tzinfo=timezone.utc))
+    assert missing["status"] == "missing_credentials"
+    assert "EBAY_CLIENT_ID" in missing["action_required"]
+
+    denied = ebay_api_health(
+        credentials_configured=True,
+        oauth_ok=True,
+        browse_ok=False,
+        error=EbayApiError("restricted", status_code=403, stage="browse_search"),
+        checked_at=datetime(2026, 8, 15, tzinfo=timezone.utc),
+    )
+    assert denied["status"] == "browse_not_approved"
+    assert denied["oauth_status"] == "ok"
+    assert "Production利用申請" in denied["action_required"]
+
+
+def test_watchlist_keeps_learning_parts_and_prunes_stale_rows():
+    now = datetime(2026, 8, 15, tzinfo=timezone.utc)
+    previous = [
+        {"part_number": "25550-5SA0A", "market_score": 50, "last_seen": "2026-08-01", "missed_runs": 0},
+        {"part_number": "90915-YZZF2", "market_score": 99, "last_seen": "2026-01-01", "missed_runs": 3},
+    ]
+    candidates = [{"part_number": "15400-PLM-A02", "market_score": 80}]
+    result = merge_watchlist(previous, candidates, now, stale_days=90)
+    parts = {row["part_number"] for row in result}
+    assert "25550-5SA0A" in parts
+    assert "15400-PLM-A02" in parts
+    assert "90915-YZZF2" not in parts
+    kept = next(row for row in result if row["part_number"] == "25550-5SA0A")
+    assert kept["missed_runs"] == 1
+
+
+def test_optional_analytics_permission_is_not_misreported_as_browse_denial():
+    analytics = EbayApiError("restricted", status_code=403, stage="developer_analytics")
+    browse = EbayApiError("restricted", status_code=403, stage="browse_search")
+    assert classify_ebay_error(analytics) == "analytics_unavailable"
+    assert classify_ebay_error(browse) == "browse_not_approved"
+
+
+def test_research_run_status_distinguishes_empty_success_from_api_failure():
+    assert research_run_status(
+        selected_query_count=8,
+        discovery_failures=0,
+        target_part_count=0,
+        exact_search_failures=0,
+        candidate_count=0,
+    ) == "success"
+    assert research_run_status(
+        selected_query_count=8,
+        discovery_failures=8,
+        target_part_count=0,
+        exact_search_failures=0,
+        candidate_count=0,
+    ) == "discovery_unavailable"
+    assert research_run_status(
+        selected_query_count=8,
+        discovery_failures=2,
+        target_part_count=5,
+        exact_search_failures=1,
+        candidate_count=3,
+    ) == "partial_success"
+
+
+def test_all_exact_search_failures_preserve_previous_candidates():
+    previous = {
+        "generated_at": "2026-08-14T00:00:00Z",
+        "products": [{"part_number": "25550-5SA0A"}],
+        "automation": {
+            "last_successful_research_at": "2026-08-14T00:00:00Z",
+            "ebay_api": {"ready": True},
+        },
+    }
+    status = research_run_status(
+        selected_query_count=8,
+        discovery_failures=0,
+        target_part_count=4,
+        exact_search_failures=4,
+        candidate_count=0,
+    )
+    assert status == "exact_search_unavailable"
+    assert should_preserve_previous_results(previous, [], status) is True
+    assert should_preserve_previous_results(previous, [{"part_number": "NEW"}], status) is False
+
+
+def test_status_payload_marks_retry_and_keeps_last_success_timestamp():
+    observed = datetime(2026, 8, 15, tzinfo=timezone.utc)
+    previous = {
+        "generated_at": "2026-08-14T00:00:00Z",
+        "products": [{"part_number": "25550-5SA0A"}],
+        "automation": {
+            "last_successful_research_at": "2026-08-14T00:00:00Z",
+            "ebay_api": {"ready": True},
+        },
+    }
+    health = ebay_api_health(
+        credentials_configured=True,
+        oauth_ok=True,
+        browse_ok=True,
+        checked_at=observed,
+    )
+    payload = build_status_payload(
+        previous,
+        health,
+        observed,
+        rakuten_enabled=False,
+        research_status="exact_search_unavailable",
+        discovery_failures=1,
+        exact_search_failures=4,
+        selected_query_count=8,
+        target_part_count=4,
+    )
+    assert payload["app_version"] == "0.4.1"
+    assert payload["data_status"] == "previous_real"
+    assert payload["products"] == previous["products"]
+    assert payload["automation"]["research_status"] == "exact_search_unavailable"
+    assert payload["automation"]["last_successful_research_at"] == "2026-08-14T00:00:00Z"
+    assert "次回に自動再試行" in payload["method_note"]

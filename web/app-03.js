@@ -7,6 +7,8 @@ function normalizeProduct(product) {
     sales_confidence: product.sales_confidence || (product.sales_auto_verified ? "high" : "learning"),
     sales_observed_days: number(product.sales_observed_days, 0),
     sales_observed_delta: number(product.sales_observed_delta, 0),
+    sales_lifetime_signal: number(product.sales_lifetime_signal, 0),
+    sales_days_until_usable: number(product.sales_days_until_usable, 0),
     sales_tracked_listings: number(product.sales_tracked_listings, 0),
     sales_auto_verified: product.sales_auto_verified === true,
     competition_known: product.competition_known !== false,
@@ -43,38 +45,140 @@ function getVisibleProducts() {
   return products;
 }
 
+function setApiStatus(element, text, kind = "info") {
+  if (!element) return;
+  element.textContent = text;
+  element.className = `status-${kind}`;
+}
+
 function renderAutomation() {
   const automation = state.apiPayload?.automation || {};
+  const api = automation.ebay_api || {};
+  const status = String(api.status || "checking");
+  const researchStatus = String(automation.research_status || (api.ready ? "success" : "api_unavailable"));
+  const researchRetry = RESEARCH_RETRY_STATUSES.has(researchStatus);
   const generated = state.apiPayload?.generated_at ? new Date(state.apiPayload.generated_at) : null;
   const ageHours = generated && !Number.isNaN(generated.getTime()) ? (Date.now() - generated.getTime()) / 3600000 : Infinity;
   const fresh = ageHours <= 48;
-  els.automationHealth.textContent = fresh ? "自動運転中" : "更新を確認";
-  els.automationHealth.className = `health-badge ${fresh ? "badge-good" : "badge-warn"}`;
-  els.flowResearch.textContent = automation.queries_per_run
-    ? `1回${number(automation.queries_per_run)}語を巡回／監視品番${number(automation.watchlist_size)}件`
-    : "GitHub Actionsで毎日自動実行";
-  const insights = automation.marketplace_insights || {};
-  if (insights.available) {
-    els.flowMarket.textContent = `eBay公式90日成約を自動取得／差分記録${number(automation.snapshot_runs)}回`;
-  } else if (insights.status === "not_approved") {
-    els.flowMarket.textContent = `公式成約API未承認のため自動差分へ切替／記録${number(automation.snapshot_runs)}回`;
-  } else {
-    els.flowMarket.textContent = automation.snapshot_runs
-      ? `差分記録 ${number(automation.snapshot_runs)}回。30日で自動精度・高`
-      : "公式成約APIを自動確認し、使えなければ差分記録を開始";
+  const ready = api.ready === true;
+
+  let healthText = "確認中";
+  let healthClass = "badge-info";
+  if (ready && researchRetry) {
+    healthText = "前回結果保持・自動再試行";
+    healthClass = "badge-warn";
+  } else if (ready && researchStatus === "partial_success") {
+    healthText = "一部取得・自動再試行";
+    healthClass = "badge-warn";
+  } else if (ready && fresh) {
+    healthText = "自動運転中";
+    healthClass = "badge-good";
+  } else if (status === "browse_not_approved") {
+    healthText = "Browse申請必要";
+    healthClass = "badge-bad";
+  } else if (["missing_credentials", "invalid_credentials", "token_rejected"].includes(status)) {
+    healthText = "初回設定必要";
+    healthClass = "badge-warn";
+  } else if (ready) {
+    healthText = "更新を確認";
+    healthClass = "badge-warn";
+  } else if (["rate_limited", "temporary_error", "oauth_temporary_error"].includes(status)) {
+    healthText = "自動再試行";
+    healthClass = "badge-warn";
   }
+  els.automationHealth.textContent = healthText;
+  els.automationHealth.className = `health-badge ${healthClass}`;
+
+  setApiStatus(els.setupCredentials, api.credentials_configured ? "登録済み" : "未登録", api.credentials_configured ? "good" : "warn");
+  setApiStatus(els.setupOauth, api.oauth_status === "ok" ? "成功" : status === "invalid_credentials" ? "失敗" : "未確認", api.oauth_status === "ok" ? "good" : status === "invalid_credentials" ? "bad" : "warn");
+  setApiStatus(els.setupBrowse, api.browse_status === "ok" ? "利用可能" : status === "browse_not_approved" ? "申請必要" : "未確認", api.browse_status === "ok" ? "good" : status === "browse_not_approved" ? "bad" : "warn");
+  const runs = number(automation.snapshot_runs);
+  const hasPreviousSuccess = Boolean(automation.last_successful_research_at);
+  if (ready) {
+    setApiStatus(els.setupLearning, runs > 0 ? `${runs}回記録` : "初回観測", runs > 0 ? "good" : "info");
+  } else {
+    setApiStatus(els.setupLearning, hasPreviousSuccess && runs > 0 ? `${runs}回保持` : "開始前", hasPreviousSuccess ? "info" : "warn");
+  }
+  if (ready && researchRetry) {
+    els.runStatus.textContent = "前回実データを保持 / 次回自動再試行";
+  } else if (ready && researchStatus === "partial_success") {
+    els.runStatus.textContent = "一部取得済み / 失敗分は次回自動再試行";
+  } else if (!ready && !hasPreviousSuccess) {
+    els.runStatus.textContent = "初回設定待ち / サンプル表示";
+  } else if (!ready && hasPreviousSuccess) {
+    els.runStatus.textContent = "前回実データを保持 / API再診断待ち";
+  }
+
+  const quota = api.quota || {};
+  const quotaText = quota.available && number(quota.limit) > 0
+    ? ` / API残り ${number(quota.remaining).toLocaleString("ja-JP")}/${number(quota.limit).toLocaleString("ja-JP")}`
+    : "";
+  if (ready) {
+    const runLabel = RESEARCH_STATUS_LABELS[researchStatus] || "調査状態不明";
+    els.flowResearch.textContent = `Production OAuth・Browse接続済み${quotaText} / ${runLabel}`;
+  } else {
+    els.flowResearch.textContent = `${EBAY_API_STATUS_LABELS[status] || "未接続"}：${api.action_required || "初回診断を実行"}`;
+  }
+  els.flowMarket.textContent = ready
+    ? automation.snapshot_runs
+      ? `1回${number(automation.queries_per_run)}語を巡回／監視${number(automation.watchlist_size)}品番／差分記録${runs}回`
+      : "初回観測を開始。7日未満は90日販売数を出しません"
+    : "Browse API接続後に、自動巡回と販売差分学習を開始";
   els.flowProcurement.textContent = automation.rakuten_enabled
-    ? "楽天API接続済み。仕入価格を自動入力"
-    : "楽天API未設定。検索ボタンで確認";
+    ? "楽天API接続済み。品番一致価格を自動入力"
+    : "楽天API未設定。楽天・モノタロウを1タップ検索";
 }
 
+
 function updateGlobalNextTask(sorted) {
+  const api = state.apiPayload?.automation?.ebay_api || {};
+  const status = String(api.status || "checking");
+  const researchStatus = String(state.apiPayload?.automation?.research_status || (api.ready ? "success" : "api_unavailable"));
+  if (status === "missing_credentials") {
+    els.nextTaskTitle.textContent = "Productionキーを2つ登録";
+    els.nextTaskDetail.textContent = "GitHub SecretsへEBAY_CLIENT_IDとEBAY_CLIENT_SECRETを登録し、「今すぐ更新」を1回押してください。";
+    return;
+  }
+  if (status === "invalid_credentials") {
+    els.nextTaskTitle.textContent = "Productionキーの組み合わせを確認";
+    els.nextTaskDetail.textContent = "SandboxではなくProductionのApp IDとCert IDを同じKeysetから登録し直してください。";
+    return;
+  }
+  if (status === "browse_not_approved") {
+    els.nextTaskTitle.textContent = "Browse APIのProduction利用申請が必要";
+    els.nextTaskDetail.textContent = "キーは有効でOAuthも成功しています。eBay側でBuy/Browse API本番権限を申請してください。";
+    return;
+  }
+  if (["token_rejected", "request_rejected"].includes(status)) {
+    els.nextTaskTitle.textContent = "eBay API設定を確認";
+    els.nextTaskDetail.textContent = api.action_required || "Actionsログの診断結果を確認してください。";
+    return;
+  }
+  if (["rate_limited", "temporary_error", "oauth_temporary_error"].includes(status)) {
+    els.nextTaskTitle.textContent = "自動再実行を待ちます";
+    els.nextTaskDetail.textContent = "人の操作は不要です。次回の定期実行で再診断します。";
+    return;
+  }
+  if (api.ready === true && RESEARCH_RETRY_STATUSES.has(researchStatus)) {
+    els.nextTaskTitle.textContent = "検索失敗分を自動再実行します";
+    els.nextTaskDetail.textContent = "人の操作は不要です。候補は消さず前回結果を保持し、次回の定期実行で再試行します。";
+    return;
+  }
   if (!sorted.length) {
-    els.nextTaskTitle.textContent = "eBay自動調査を実行してください";
-    els.nextTaskDetail.textContent = "GitHub Secretsを設定後、「今すぐ更新」を押します。以後は毎日自動です。";
+    els.nextTaskTitle.textContent = api.ready ? "初回の候補探索を継続中" : "Production API診断を実行";
+    els.nextTaskDetail.textContent = api.ready ? "操作は不要です。次回の自動巡回で候補を追加します。" : "「今すぐ更新」を押すと原因を自動判定します。";
     return;
   }
   const rows = sorted.map((product) => ({ product, profit: calculateProfit(product) }));
+  const learning = rows.find(({ product, profit }) => !profit.salesVerified && !CONFIRMED_SALES_QUALITIES.has(product.sales_quality));
+  if (learning) {
+    const days = number(learning.product.sales_observed_days);
+    els.nextTaskTitle.textContent = "販売差分を自動学習中です";
+    els.nextTaskDetail.textContent = days < 7
+      ? `操作は不要です。観測${Math.round(days)}日で、7日までは90日販売数を出しません。`
+      : "操作は不要です。30日以上かつ市場カバーが十分になると自動精度・高へ進みます。";
+    return;
+  }
   const procurementMissing = rows.find(({ profit }) => !profit.hasProcurement && profit.profit > -100000);
   if (procurementMissing) {
     els.nextTaskTitle.textContent = `${procurementMissing.product.part_number}の仕入価格を確認`;
@@ -91,12 +195,6 @@ function updateGlobalNextTask(sorted) {
   if (tariffPending) {
     els.nextTaskTitle.textContent = `${tariffPending.product.part_number}の原産国・DDP関税を確認`;
     els.nextTaskDetail.textContent = "日本原産15%は仮計算です。仕入前にDDP見積を確認してください。";
-    return;
-  }
-  const learning = rows.find(({ profit }) => !profit.salesVerified && profit.operationalFailed.length === 0);
-  if (learning) {
-    els.nextTaskTitle.textContent = "販売差分を自動学習中です";
-    els.nextTaskDetail.textContent = "操作は不要です。毎日の差分が30日分たまると自動で最終判定へ進みます。";
     return;
   }
   const ready = rows.find(({ profit }) => profit.passes);
@@ -165,23 +263,20 @@ function createProductCard(product, rank) {
   card.querySelector(".competition-value").textContent = product.competition_known === false ? "不明" : `${competitionPrefix}${Math.round(number(product.active_competition))}件`;
   card.querySelector(".price-value").textContent = usd(product.price_median_usd);
   card.querySelector(".profit-value-main").textContent = profit.hasCosts ? yen(profit.profit) : "未確定";
-  const officialSales = product.sales_quality === "marketplace_insights_90d";
   card.querySelector(".quality-label").textContent = QUALITY_LABELS[product.sales_quality] || SALES_CONFIDENCE_LABELS[confidence] || "不明";
-  card.querySelector(".observation-label").textContent = officialSales
-    ? "eBay公式・過去90日"
-    : isSalesAutoVerified(product)
-      ? `観測 ${Math.round(number(product.sales_observed_days, 90))}日`
-      : `観測 ${Math.round(number(product.sales_observed_days))}日 / 30日で高精度`;
+  const observedDays = number(product.sales_observed_days);
+  card.querySelector(".observation-label").textContent = isSalesAutoVerified(product)
+    ? `観測 ${Math.round(observedDays)}日 / 高精度`
+    : observedDays >= 7
+      ? `観測 ${Math.round(observedDays)}日 / 30日で高精度`
+      : `観測 ${Math.round(observedDays)}日 / あと${Math.ceil(number(product.sales_days_until_usable, Math.max(0, 7 - observedDays)))}日で数値化`;
   const low = number(product.sold_90d_low, 0);
   const high = number(product.sold_90d_high, number(product.sold_90d_est));
-  const tracking = officialSales
-    ? `公式成約${Math.round(number(product.sales_observed_delta))}個・一致${Math.round(number(product.sales_tracked_listings))}出品 / `
-    : number(product.sales_tracked_listings) > 0
-      ? `追跡${Math.round(number(product.sales_tracked_listings))}出品・観測増分${Math.round(number(product.sales_observed_delta))}個 / `
-      : "";
-  const rangeText = officialSales ? `実績 ${low.toFixed(1)}個` : `推定幅 ${low.toFixed(1)}–${high.toFixed(1)}個`;
-  const priceLabel = product.price_source === "marketplace_insights_last_sold" ? "成約相場帯" : "出品相場帯";
-  card.querySelector(".range-note").textContent = `${tracking}${rangeText} / ${priceLabel} ${usd(product.price_p25_usd)}–${usd(product.price_p75_usd)} / 市場スコア ${number(product.market_score)}`;
+  const tracking = number(product.sales_tracked_listings) > 0
+    ? `追跡${Math.round(number(product.sales_tracked_listings))}出品・観測増分${Math.round(number(product.sales_observed_delta))}個 / `
+    : `初期累計シグナル${Math.round(number(product.sales_lifetime_signal))}個（販売数には未加算） / `;
+  const rangeText = observedDays >= 7 ? `推定幅 ${low.toFixed(1)}–${high.toFixed(1)}個` : "90日換算は未表示";
+  card.querySelector(".range-note").textContent = `${tracking}${rangeText} / 出品相場帯 ${usd(product.price_p25_usd)}–${usd(product.price_p75_usd)} / 市場スコア ${number(product.market_score)}`;
 
   card.querySelector(".procurement-value").textContent = number(values.procurementJpy) > 0 ? yen(values.procurementJpy) : "未取得";
   card.querySelector(".shipping-value").textContent = yen(values.internationalShippingJpy);

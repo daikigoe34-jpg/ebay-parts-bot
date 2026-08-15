@@ -65,7 +65,19 @@ main { width: min(100%, 920px); margin: 0 auto; padding: 13px; }
 .automation-title-row { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
 .step-kicker { display: block; color: var(--accent); font-size: .68rem; font-weight: 850; letter-spacing: .05em; }
 .automation-title-row h2 { margin: 3px 0 0; font-size: 1.08rem; }
-.health-badge { white-space: nowrap; border-radius: 999px; padding: 6px 10px; background: var(--info-bg); color: var(--info); font-size: .7rem; font-weight: 850; }
+.health-badge { max-width: 48%; flex-shrink: 0; white-space: normal; text-align: center; line-height: 1.25; border-radius: 999px; padding: 6px 10px; background: var(--info-bg); color: var(--info); font-size: .7rem; font-weight: 850; overflow-wrap: anywhere; }
+.api-status-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 12px;
+}
+.api-status-grid > div {
+  min-width: 0; padding: 8px 5px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); text-align: center;
+}
+.api-status-grid span { display: block; color: var(--muted); font-size: .54rem; margin-bottom: 4px; }
+.api-status-grid strong { display: block; font-size: .66rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status-good { color: var(--good); }
+.status-warn { color: var(--warn); }
+.status-bad { color: var(--bad); }
+.status-info { color: var(--info); }
 .flow-list { list-style: none; padding: 0; margin: 14px 0 0; display: grid; gap: 9px; }
 .flow-list li { display: flex; gap: 10px; align-items: center; min-width: 0; }
 .flow-number {
@@ -220,3 +232,5 @@ footer .secondary-button { width: 100%; }
   .metric-grid strong { font-size: .7rem; }
   .auto-cost-grid strong { font-size: .62rem; }
 }
+
+@media (max-width: 430px) { .api-status-grid { grid-template-columns: repeat(2, 1fr); } }

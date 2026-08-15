@@ -12,6 +12,7 @@ const STORAGE_KEYS = {
 const DEFAULT_SETTINGS = {
   sellerPlan: "no_store_or_starter",
   monthlySalesUsd: 0,
+  internationalFeeDiscountEligible: true,
   autoExchangeRate: true,
   exchangeRate: 150,
   buyerSalesTaxRate: 7,
@@ -35,19 +36,16 @@ const DEFAULT_SETTINGS = {
 };
 
 const QUALITY_LABELS = {
-  marketplace_insights_90d: "eBay公式・過去90日",
-  observed_delta_30d: "自動差分・高精度",
-  observed_delta: "自動差分",
-  mixed_estimate: "掲載データ推定",
-  listing_lifetime_under_90d: "掲載累計から推定",
-  lifetime_velocity_estimate: "掲載平均から推定",
+  observed_delta_30d: "Production差分・高精度",
+  observed_delta: "Production差分",
+  learning_baseline: "Production差分を学習中",
   insufficient: "データ不足",
-  product_research_csv: "Product Research CSV",
-  product_research_manual: "Product Research確認済み",
+  product_research_csv: "任意CSV補正",
+  product_research_manual: "任意手動補正",
 };
 
 const SALES_CONFIDENCE_LABELS = {
-  confirmed: "公式実績・確認済み",
+  confirmed: "任意補正・確認済み",
   high: "自動精度・高",
   medium: "自動精度・中",
   low: "自動精度・低",
@@ -78,7 +76,35 @@ const ORIGIN_LABELS = {
   "": "不明",
 };
 
-const CONFIRMED_SALES_QUALITIES = new Set(["marketplace_insights_90d", "product_research_csv", "product_research_manual"]);
+const CONFIRMED_SALES_QUALITIES = new Set(["product_research_csv", "product_research_manual"]);
+
+const EBAY_API_STATUS_LABELS = {
+  ready: "接続済み",
+  missing_credentials: "未登録",
+  invalid_credentials: "キー不一致",
+  browse_not_approved: "本番権限なし",
+  token_rejected: "トークン拒否",
+  rate_limited: "上限到達",
+  request_rejected: "要求拒否",
+  oauth_temporary_error: "一時障害",
+  temporary_error: "一時障害",
+  checking: "確認中",
+};
+
+const RESEARCH_STATUS_LABELS = {
+  success: "調査完了",
+  partial_success: "一部取得・自動再試行",
+  partial_failure: "前回結果保持",
+  discovery_unavailable: "候補探索を自動再試行",
+  exact_search_unavailable: "品番調査を自動再試行",
+  api_unavailable: "API設定待ち",
+};
+
+const RESEARCH_RETRY_STATUSES = new Set([
+  "partial_failure",
+  "discovery_unavailable",
+  "exact_search_unavailable",
+]);
 
 function loadJson(key, fallback) {
   if (typeof localStorage === "undefined") return structuredClone(fallback);
@@ -130,6 +156,10 @@ const state = {
 const els = typeof document !== "undefined" ? {
   runStatus: document.querySelector("#run-status"),
   automationHealth: document.querySelector("#automation-health"),
+  setupCredentials: document.querySelector("#setup-credentials"),
+  setupOauth: document.querySelector("#setup-oauth"),
+  setupBrowse: document.querySelector("#setup-browse"),
+  setupLearning: document.querySelector("#setup-learning"),
   flowResearch: document.querySelector("#flow-research"),
   flowMarket: document.querySelector("#flow-market"),
   flowProcurement: document.querySelector("#flow-procurement"),

@@ -1,0 +1,54 @@
+Part Scout Mobile v0.4.1 validation
+
+Configuration
+- eBay Production App ID / Cert ID only
+- OAuth Client Credentials application token
+- Browse API production access diagnosed separately
+- No Marketplace Insights or sold-history API dependency
+- Optional Developer Analytics failure never changes Browse access status
+
+Automated tests
+- Python: 30 passed
+- JavaScript core tests: passed
+- Python / JavaScript / JSON / YAML syntax: passed
+- iPhone viewport 390 x 844: no horizontal overflow
+- Four ordered tabs: passed
+- Production setup, ready and Browse-denied guidance: passed
+- Account-specific fee switches persist: passed
+- Browser console and page errors: none
+
+Failure safety
+- Missing or invalid credentials preserve previous products
+- Browse production denial preserves previous products
+- All discovery request failures preserve previous products and learning state
+- All exact-part request failures preserve previous products and learning state
+- Partial success publishes usable candidates and retries failed requests later
+- Successful zero-result searches are not misclassified as API failures
+- Optional Analytics 403 is classified as analytics_unavailable
+
+Sales estimation
+- Lifetime sold quantity is never used as 90-day sales
+- Under 7 observed days stays at 0 / learning
+- Only positive estimatedSoldQuantity deltas after observation begin are annualized
+- Ended/disappeared listings remain in historical deltas
+
+Fee and cost controls
+- International Fee volume discount can be disabled; disabled mode uses 1.35%
+- Payoneer annual fee is an explicit account-specific switch
+- Payoneer annual fee applicability is never inferred from eBay sales
+- eBay, International Fee, Japanese consumption tax, ads, listing fee, Payoneer, tariff screening and logistics are separated
+
+External verification still required
+- Live Production OAuth/Browse call requires the user's GitHub Secrets
+- Browse production access may require eBay approval
+- HTSUS, origin, current U.S. measures and DDP quote must be confirmed before purchase
+- Payoneer account-specific fees must be entered once from the user's account
+
+Browser verification evidence
+- Report: docs/BROWSER_TEST_REPORT.json
+- Viewport: 390 x 844
+- Initial setup, ready and Browse-denied states: passed
+- Horizontal overflow: none
+- Four tabs and settings persistence: passed
+- JavaScript console/page errors: none
+- A later repeat attempt was blocked by the runtime's localhost navigation policy; the preserved successful report remains the validation evidence

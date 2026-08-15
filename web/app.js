@@ -32,4 +32,6 @@ module.exports = vm.runInThisContext(`({
   getCostValues,
   effectiveExchangeRate,
   isSalesAutoVerified,
+  RESEARCH_STATUS_LABELS,
+  RESEARCH_RETRY_STATUSES,
 })`);

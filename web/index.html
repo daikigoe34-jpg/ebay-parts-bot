@@ -10,6 +10,7 @@
   <title>Part Scout Mobile</title>
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="apple-touch-icon" href="./icons/icon-512.png">
+  <link rel="icon" type="image/png" href="./icons/icon-512.png">
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
@@ -34,9 +35,15 @@
         </div>
         <span id="automation-health" class="health-badge">確認中</span>
       </div>
+      <div class="api-status-grid" aria-label="Production API設定状況">
+        <div><span>Productionキー</span><strong id="setup-credentials">確認中</strong></div>
+        <div><span>OAuth認証</span><strong id="setup-oauth">確認中</strong></div>
+        <div><span>Browse本番権限</span><strong id="setup-browse">確認中</strong></div>
+        <div><span>販売差分学習</span><strong id="setup-learning">確認中</strong></div>
+      </div>
       <ol class="flow-list">
-        <li><span class="flow-number">1</span><div><strong>eBayを自動巡回</strong><small id="flow-research">実行状況を確認中</small></div></li>
-        <li><span class="flow-number">2</span><div><strong>品番・販売ペース・競合を自動集計</strong><small id="flow-market">集計中</small></div></li>
+        <li><span class="flow-number">1</span><div><strong>Production APIを自動診断</strong><small id="flow-research">キー・OAuth・Browse権限を確認中</small></div></li>
+        <li><span class="flow-number">2</span><div><strong>eBayを巡回し品番を自動抽出</strong><small id="flow-market">販売差分の学習状況を確認中</small></div></li>
         <li><span class="flow-number">3</span><div><strong>楽天価格を自動取得</strong><small id="flow-procurement">設定状況を確認中</small></div></li>
         <li><span class="flow-number">4</span><div><strong>利益順に並べて次の操作を表示</strong><small>黄色の「次にすること」だけ処理してください</small></div></li>
       </ol>
@@ -52,7 +59,7 @@
     <nav class="tabs" aria-label="操作手順">
       <button class="tab is-active" data-tab="today" type="button"><span>1</span>今日やる</button>
       <button class="tab" data-tab="all" type="button"><span>2</span>全候補</button>
-      <button class="tab" data-tab="accuracy" type="button"><span>3</span>精度補正</button>
+      <button class="tab" data-tab="accuracy" type="button"><span>3</span>任意補正</button>
       <button class="tab" data-tab="settings" type="button"><span>4</span>設定</button>
     </nav>
 
@@ -87,12 +94,12 @@
 
     <section id="tab-accuracy" class="tab-panel">
       <article class="panel-card emphasis-card">
-        <h2>通常は入力不要です</h2>
-        <p>毎日の差分が30日分たまると、Product Researchを入力しなくても「自動精度・高」になります。今すぐ精度を上げたい品番だけ、下のCSVまたは手入力で上書きします。</p>
+        <h2>日常操作では使いません</h2>
+        <p>Production Browse APIの日次差分だけで自動学習します。CSV・手入力は、30日待たずに特定品番だけ検算したい場合の上級者向け任意機能です。</p>
       </article>
 
       <details class="panel-card optional-panel">
-        <summary>Product ResearchのCSVを取り込む</summary>
+        <summary>上級者向け：外部調査CSVで一時補正</summary>
         <p>CSVを選ぶと、販売数・競合・価格を品番単位でまとめて補正します。データはこのiPhone内にだけ保存されます。</p>
         <label class="primary-button file-button">CSVを選択<input id="csv-input" type="file" accept=".csv,text/csv,text/tab-separated-values" hidden></label>
         <p id="csv-status" class="muted">未取込</p>
@@ -100,12 +107,12 @@
       </details>
 
       <details class="panel-card optional-panel">
-        <summary>上位1品番だけ手入力する</summary>
+        <summary>上級者向け：1品番だけ一時補正</summary>
         <form id="manual-research-form" class="manual-research-form">
           <label>品番<input name="partNumber" type="text" required autocomplete="off" placeholder="25550-5SA0A"></label>
-          <label>過去90日販売数<input name="sold90d" type="number" min="0" step="1" required></label>
+          <label>外部調査で確認した90日販売数<input name="sold90d" type="number" min="0" step="1" required></label>
           <label>現在の競合出品数<input name="activeCompetition" type="number" min="0" step="1" required></label>
-          <label>成約価格（USD）<input name="medianPriceUsd" type="number" min="0" step="0.01" required></label>
+          <label>外部調査で確認した価格（USD）<input name="medianPriceUsd" type="number" min="0" step="0.01" required></label>
           <label>販売セラー数（任意）<input name="sellerCount" type="number" min="0" step="1"></label>
           <button class="primary-button" type="submit">この品番だけ保存</button>
           <p id="manual-status" class="muted"></p>
@@ -124,7 +131,8 @@
             </select>
           </label>
           <label>前々月のeBay売上（USD）<input name="monthlySalesUsd" type="number" min="0" step="100"></label>
-          <p class="muted">海外決済手数料のボリューム割引を自動計算します。</p>
+          <label class="check-row simple-check"><input name="internationalFeeDiscountEligible" type="checkbox">海外決済手数料の売上割引を使用</label>
+          <p class="muted">前月20日時点でBelow Standardならチェックを外してください。OFF時は1.35%で計算します。</p>
           <label class="check-row simple-check"><input name="autoExchangeRate" type="checkbox">為替を毎日自動更新</label>
           <label>手動為替（1 USD＝円）<input name="exchangeRate" type="number" min="1" step="0.01"></label>
           <label>米国売上税の仮定（%）<input name="buyerSalesTaxRate" type="number" min="0" step="0.01"></label>
@@ -137,9 +145,9 @@
           <label>Payoneer出金率（%）<input name="payoneerWithdrawalRate" type="number" min="0" max="10" step="0.1"></label>
           <p class="muted">初期値3%。実アカウント表示が分かれば、その数値へ1回だけ変更してください。</p>
           <label>Payoneer固定費／1件（円）<input name="payoneerFixedJpy" type="number" min="0" step="1"></label>
-          <label class="check-row simple-check"><input name="includePayoneerAnnualFee" type="checkbox">年間アカウント手数料を自動配賦</label>
+          <label class="check-row simple-check"><input name="includePayoneerAnnualFee" type="checkbox">年間アカウント手数料を見込む</label>
           <label>年間手数料の手動配賦（円・0で自動）<input name="payoneerAnnualAllocationJpy" type="number" min="0" step="1"></label>
-          <p class="muted">直近12か月の受取が6,000USD未満の場合を自動判定し、29.95USDを推定取引数で配賦します。初年度等で対象外ならチェックを外してください。</p>
+          <p class="muted">連続12か月の受取が6,000USD未満など、実アカウントで対象ならONにします。29.95USDを推定取引数へ配賦し、対象外ならOFFにしてください。</p>
           <label>広告率（%）<input name="promotedRate" type="number" min="0" step="0.1"></label>
           <label>返品・不良引当（%）<input name="returnReserveRate" type="number" min="0" step="0.1"></label>
           <label>追加落札手数料（%）<input name="additionalFvfRate" type="number" min="0" step="0.1"></label>

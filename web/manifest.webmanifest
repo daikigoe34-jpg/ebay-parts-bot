@@ -1,12 +1,12 @@
 {
   "name": "Part Scout Mobile",
   "short_name": "Part Scout",
-  "description": "eBay Motorsの自動車部品を品番単位で調査し、仕入れ・利益を判定するPWA",
+  "description": "eBay Production Browse APIで自動車部品を日次観測し、iPhoneで仕入れ・利益を順番判定するPWA",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
   "background_color": "#f3f4f6",
-  "theme_color": "#111827",
+  "theme_color": "#0f172a",
   "lang": "ja",
   "icons": [
     {

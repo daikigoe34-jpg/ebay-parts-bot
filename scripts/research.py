@@ -60,14 +60,28 @@ RESEARCH_STATE_PATH = ROOT / "state" / "research_state.json"
 
 TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token"
 BROWSE_ROOT = "https://api.ebay.com/buy/browse/v1"
-MARKETPLACE_INSIGHTS_ROOT = "https://api.ebay.com/buy/marketplace_insights/v1_beta"
 OAUTH_SCOPE = "https://api.ebay.com/oauth/api_scope"
 RAKUTEN_ENDPOINT = "https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260701"
 ECB_DAILY_XML = "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml"
+ANALYTICS_RATE_LIMIT_URL = "https://api.ebay.com/developer/analytics/v1_beta/rate_limit/"
+APP_VERSION = "0.4.1"
 
 
 class EbayApiError(RuntimeError):
-    pass
+    """Structured eBay failure without leaking credentials or access tokens."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        stage: str = "",
+        response_body: str = "",
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.stage = stage
+        self.response_body = response_body[:1000]
 
 
 class EbayBrowseClient:
@@ -78,23 +92,53 @@ class EbayBrowseClient:
         self.session = requests.Session()
         self.token = self._get_token()
 
+    @staticmethod
+    def _error_text(response: requests.Response) -> str:
+        try:
+            payload = response.json()
+        except ValueError:
+            return str(response.text or "")[:500]
+        errors = payload.get("errors") if isinstance(payload, dict) else None
+        if isinstance(errors, list) and errors:
+            first = errors[0] if isinstance(errors[0], dict) else {}
+            code = first.get("errorId") or first.get("errorCode") or ""
+            message = first.get("longMessage") or first.get("message") or first.get("domain") or ""
+            return f"{code}: {message}".strip(": ")[:500]
+        return json.dumps(payload, ensure_ascii=False)[:500]
+
     def _get_token(self) -> str:
         basic = base64.b64encode(f"{self.client_id}:{self.client_secret}".encode()).decode()
-        response = self.session.post(
-            TOKEN_URL,
-            headers={
-                "Authorization": f"Basic {basic}",
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-            data={"grant_type": "client_credentials", "scope": OAUTH_SCOPE},
-            timeout=30,
-        )
+        try:
+            response = self.session.post(
+                TOKEN_URL,
+                headers={
+                    "Authorization": f"Basic {basic}",
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+                data={"grant_type": "client_credentials", "scope": OAUTH_SCOPE},
+                timeout=30,
+            )
+        except requests.RequestException as exc:
+            raise EbayApiError(
+                "OAuth endpoint could not be reached",
+                stage="oauth",
+                response_body=str(exc),
+            ) from exc
         if response.status_code >= 400:
-            raise EbayApiError(f"OAuth failed: HTTP {response.status_code}: {response.text[:500]}")
-        payload = response.json()
+            detail = self._error_text(response)
+            raise EbayApiError(
+                f"OAuth failed: HTTP {response.status_code}: {detail}",
+                status_code=response.status_code,
+                stage="oauth",
+                response_body=detail,
+            )
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise EbayApiError("OAuth response was not JSON", stage="oauth") from exc
         token = payload.get("access_token")
         if not token:
-            raise EbayApiError("OAuth response did not contain access_token")
+            raise EbayApiError("OAuth response did not contain access_token", stage="oauth")
         return str(token)
 
     @property
@@ -106,17 +150,38 @@ class EbayBrowseClient:
             "Accept-Language": "en-US",
         }
 
-    def _get_json(self, url: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    def _get_json(self, url: str, params: dict[str, Any] | None = None, *, stage: str = "browse") -> dict[str, Any]:
         last_error = ""
+        last_status: int | None = None
         for attempt in range(3):
-            response = self.session.get(url, headers=self.headers, params=params, timeout=40)
+            try:
+                response = self.session.get(url, headers=self.headers, params=params, timeout=40)
+            except requests.RequestException as exc:
+                last_error = str(exc)
+                if attempt < 2:
+                    time.sleep(1.5 * (attempt + 1))
+                    continue
+                raise EbayApiError(
+                    f"{stage} endpoint could not be reached",
+                    stage=stage,
+                    response_body=last_error,
+                ) from exc
             if response.status_code < 400:
-                return response.json()
-            last_error = f"HTTP {response.status_code}: {response.text[:500]}"
+                try:
+                    return response.json()
+                except ValueError as exc:
+                    raise EbayApiError(f"{stage} response was not JSON", stage=stage) from exc
+            last_status = response.status_code
+            last_error = self._error_text(response)
             if response.status_code not in {429, 500, 502, 503, 504}:
                 break
             time.sleep(1.5 * (attempt + 1))
-        raise EbayApiError(f"GET {url} failed: {last_error}")
+        raise EbayApiError(
+            f"{stage} failed: HTTP {last_status}: {last_error}",
+            status_code=last_status,
+            stage=stage,
+            response_body=last_error,
+        )
 
     def search(self, query: str, limit: int = 100, category_id: str = "6028") -> dict[str, Any]:
         params: dict[str, Any] = {
@@ -127,149 +192,54 @@ class EbayBrowseClient:
         }
         if category_id:
             params["category_ids"] = category_id
-        return self._get_json(f"{BROWSE_ROOT}/item_summary/search", params=params)
+        return self._get_json(f"{BROWSE_ROOT}/item_summary/search", params=params, stage="browse_search")
 
     def get_item(self, item_id: str) -> dict[str, Any]:
         encoded = quote(item_id, safe="")
-        return self._get_json(f"{BROWSE_ROOT}/item/{encoded}")
+        return self._get_json(f"{BROWSE_ROOT}/item/{encoded}", stage="browse_item")
 
-
-class EbayMarketplaceInsightsClient:
-    """Optional official 90-day sold-history client.
-
-    Marketplace Insights is restricted. The normal application token is tried
-    automatically. If access is denied, the client disables itself for the rest
-    of the run and callers fall back to daily Browse snapshot deltas.
-    """
-
-    def __init__(self, browse_client: EbayBrowseClient, enabled: bool = True) -> None:
-        self.session = browse_client.session
-        self.token = browse_client.token
-        self.marketplace = browse_client.marketplace
-        self.enabled = enabled
-        self.attempted = False
-        self.available: bool | None = None
-        self.status = "not_attempted" if enabled else "disabled"
-        self.reason = ""
-        self.successful_queries = 0
-        self.fallback_queries = 0
-
-    @property
-    def headers(self) -> dict[str, str]:
-        return {
-            "Authorization": f"Bearer {self.token}",
-            "X-EBAY-C-MARKETPLACE-ID": self.marketplace,
-            "Accept-Language": "en-US",
-        }
-
-    def _disable(self, status: str, reason: str) -> None:
-        self.available = False
-        self.status = status
-        self.reason = reason[:500]
-
-    def _get_page(self, params: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
-        endpoint = f"{MARKETPLACE_INSIGHTS_ROOT}/item_sales/search"
-        last_error = ""
-        for attempt in range(3):
-            response = self.session.get(endpoint, headers=self.headers, params=params, timeout=40)
-            if response.status_code < 400:
-                self.available = True
-                self.status = "available"
-                return response.json(), ""
-            last_error = f"HTTP {response.status_code}: {response.text[:500]}"
-            if response.status_code in {401, 403, 404}:
-                self._disable("not_approved", last_error)
-                return None, last_error
-            if response.status_code == 400 and "filter" in params:
-                retry_params = dict(params)
-                retry_params.pop("filter", None)
-                response = self.session.get(endpoint, headers=self.headers, params=retry_params, timeout=40)
-                if response.status_code < 400:
-                    self.available = True
-                    self.status = "available_filter_fallback"
-                    return response.json(), "filter_fallback"
-                last_error = f"HTTP {response.status_code}: {response.text[:500]}"
-                if response.status_code in {401, 403, 404}:
-                    self._disable("not_approved", last_error)
-                    return None, last_error
-            if response.status_code not in {429, 500, 502, 503, 504}:
-                break
-            time.sleep(1.5 * (attempt + 1))
-        self.status = "temporary_error"
-        self.reason = last_error
-        return None, last_error
-
-    def search_part(self, part_number: str, observed_at: datetime, max_items: int = 1000) -> dict[str, Any]:
-        if not self.enabled:
-            self.fallback_queries += 1
-            return {"available": False, "status": "disabled", "usable": False, "items": []}
-        if self.available is False:
-            self.fallback_queries += 1
+    def rate_limits(self) -> dict[str, Any]:
+        """Best-effort Browse quota status; never blocks the research run."""
+        try:
+            payload = self._get_json(ANALYTICS_RATE_LIMIT_URL, stage="developer_analytics")
+        except EbayApiError as exc:
             return {
                 "available": False,
-                "status": self.status,
-                "reason": self.reason,
-                "usable": False,
-                "items": [],
+                "status": classify_ebay_error(exc),
+                "message": str(exc)[:300],
             }
-
-        self.attempted = True
-        start = observed_at - timedelta(days=90)
-        start_text = start.strftime("%Y-%m-%dT%H:%M:%S.000Z")
-        end_text = observed_at.strftime("%Y-%m-%dT%H:%M:%S.000Z")
-        rows: list[dict[str, Any]] = []
-        total = 0
-        offset = 0
-        filter_fallback = False
-        while offset < max_items:
-            limit = min(200, max_items - offset)
-            params: dict[str, Any] = {
-                "q": part_number,
-                "limit": limit,
-                "offset": offset,
-                "filter": f"lastSoldDate:[{start_text}..{end_text}]",
-            }
-            payload, note = self._get_page(params)
-            if payload is None:
-                self.fallback_queries += 1
-                return {
-                    "available": False,
-                    "status": self.status,
-                    "reason": self.reason,
-                    "usable": False,
-                    "items": [],
-                }
-            filter_fallback = filter_fallback or note == "filter_fallback"
-            page_rows = payload.get("itemSales") or payload.get("item_sales") or []
-            page_rows = [row for row in page_rows if isinstance(row, dict)]
-            rows.extend(page_rows)
-            total = max(total, int(safe_float(payload.get("total"), len(rows))))
-            if len(page_rows) < limit or len(rows) >= total:
-                break
-            offset += limit
-
-        result = summarize_marketplace_insights(part_number, rows, search_total=total)
-        result.update({
-            "available": True,
-            "status": "available_filter_fallback" if filter_fallback else "available",
-            "reason": "",
-        })
-        if result.get("usable"):
-            self.successful_queries += 1
-        else:
-            self.fallback_queries += 1
-        return result
-
-    def summary(self) -> dict[str, Any]:
+        browse_rows: list[dict[str, Any]] = []
+        for row in payload.get("rateLimits") or []:
+            if not isinstance(row, dict):
+                continue
+            if str(row.get("apiContext") or "").lower() != "buy":
+                continue
+            if str(row.get("apiName") or "").lower() != "browse":
+                continue
+            for resource in row.get("resources") or []:
+                if not isinstance(resource, dict):
+                    continue
+                for rate in resource.get("rates") or []:
+                    if not isinstance(rate, dict):
+                        continue
+                    browse_rows.append({
+                        "resource": str(resource.get("name") or ""),
+                        "limit": int(safe_float(rate.get("limit"), 0)),
+                        "count": int(safe_float(rate.get("count"), 0)),
+                        "remaining": int(safe_float(rate.get("remaining"), 0)),
+                        "reset": str(rate.get("reset") or ""),
+                        "time_window_seconds": int(safe_float(rate.get("timeWindow"), 0)),
+                    })
+        if not browse_rows:
+            return {"available": True, "status": "no_browse_row", "resources": []}
+        remaining_values = [row["remaining"] for row in browse_rows if row["limit"] > 0]
+        limit_values = [row["limit"] for row in browse_rows if row["limit"] > 0]
         return {
-            "enabled": self.enabled,
-            "attempted": self.attempted,
-            "available": self.available is True,
-            "status": self.status,
-            "reason": self.reason,
-            "official_90d_queries": self.successful_queries,
-            "snapshot_fallback_queries": self.fallback_queries,
-            "fallback_method": "daily_snapshot_delta",
+            "available": True,
+            "status": "ok",
+            "remaining": min(remaining_values) if remaining_values else 0,
+            "limit": min(limit_values) if limit_values else 0,
+            "resources": browse_rows,
         }
 
 
@@ -354,78 +324,6 @@ def compact_part_number(value: str) -> str:
 def title_contains_part_number(title: Any, part_number: str) -> bool:
     compact_part = compact_part_number(part_number)
     return bool(compact_part and compact_part in compact_text(title))
-
-
-def _money_value(container: Any, currency: str = "USD") -> float | None:
-    if not isinstance(container, dict):
-        return None
-    value = safe_float(container.get("value"), 0.0)
-    code = str(container.get("currency") or container.get("currencyCode") or "").upper()
-    if value <= 0 or (code and code != currency):
-        return None
-    return value
-
-
-def summarize_marketplace_insights(
-    part_number: str,
-    rows: Iterable[dict[str, Any]],
-    search_total: int | None = None,
-) -> dict[str, Any]:
-    """Normalize official Marketplace Insights sold-history rows.
-
-    Exact part-number text matching is deliberately required. A successful
-    query returning zero rows is an official zero. Returned rows without an
-    exact title match are not trusted and trigger the snapshot fallback.
-    """
-    raw_rows = [row for row in rows if isinstance(row, dict)]
-    deduped: dict[str, dict[str, Any]] = {}
-    for index, row in enumerate(raw_rows):
-        title = row.get("title") or row.get("itemTitle") or ""
-        if not title_contains_part_number(title, part_number):
-            continue
-        item_id = str(row.get("itemId") or row.get("legacyItemId") or f"row-{index}")
-        quantity = max(0, int(safe_float(row.get("totalSoldQuantity"), 0)))
-        previous = deduped.get(item_id)
-        if previous is None or quantity > int(previous["quantity"]):
-            price = _money_value(row.get("lastSoldPrice")) or _money_value(row.get("price"))
-            seller = row.get("seller") if isinstance(row.get("seller"), dict) else {}
-            deduped[item_id] = {
-                "quantity": quantity,
-                "price_usd": price,
-                "seller": str(seller.get("username") or seller.get("userId") or ""),
-                "last_sold_date": str(row.get("lastSoldDate") or ""),
-            }
-
-    exact_rows = list(deduped.values())
-    official_zero = len(raw_rows) == 0 and int(search_total or 0) == 0
-    usable = bool(exact_rows) or official_zero
-    sold = sum(int(row["quantity"]) for row in exact_rows)
-    prices = [float(row["price_usd"]) for row in exact_rows if row.get("price_usd")]
-    sellers = {str(row["seller"]) for row in exact_rows if row.get("seller")}
-    last_dates = sorted(str(row["last_sold_date"]) for row in exact_rows if row.get("last_sold_date"))
-    return {
-        "usable": usable,
-        "quality": "marketplace_insights_90d" if usable else "marketplace_insights_no_exact_match",
-        "confidence": "confirmed" if usable else "unknown",
-        "estimate": float(sold),
-        "low": float(sold),
-        "high": float(sold),
-        "observed_days": 90.0,
-        "observed_days_min": 90.0,
-        "observed_days_max": 90.0,
-        "observed_delta": sold,
-        "tracked_listings": len(exact_rows),
-        "short_history_listings": 0,
-        "sampled_listings": len(exact_rows),
-        "search_returned": len(raw_rows),
-        "search_total": int(search_total or len(raw_rows)),
-        "exact_match_count": len(exact_rows),
-        "seller_count": len(sellers),
-        "prices_usd": prices,
-        "last_sold_date": last_dates[-1] if last_dates else "",
-        "auto_verified": usable,
-        "part_number": part_number,
-    }
 
 
 def build_query_catalog(seeds: dict[str, Any]) -> list[tuple[str, str]]:
@@ -685,27 +583,34 @@ def aggregate_sales_estimate(
             "part_number": part_number,
         }
 
-    # Learning-mode fallback: lifetime quantities from currently active listings.
-    estimates = [
-        estimate_sales_pace(item, snapshots.get(str(item.get("itemId") or ""), []), now=observed_at)
-        for item in items
-    ]
-    total = round(sum(safe_float(row.get("estimate"), 0.0) for row in estimates), 1)
-    low = round(sum(safe_float(row.get("low"), 0.0) for row in estimates), 1)
-    high = round(sum(safe_float(row.get("high"), 0.0) for row in estimates), 1)
-    qualities = {str(row.get("quality")) for row in estimates if safe_float(row.get("estimate"), 0) > 0}
-    fallback_days = [safe_float(row.get("observed_days"), 0.0) for row in estimates if safe_float(row.get("observed_days"), 0.0) > 0]
-    observed_days = float(statistics.median(fallback_days)) if fallback_days else 0.0
+    # Before seven observed days, do not manufacture a 90-day number from the
+    # listing's lifetime sold quantity. Keep that total only as a non-ranking
+    # signal so the UI can explain why the part is being monitored.
+    learning_days: list[float] = []
+    for item_id in target_ids:
+        dates = [
+            parse_snapshot_date(row.get("observed_at"))
+            for row in snapshots.get(item_id, [])
+            if isinstance(row, dict)
+        ]
+        dates = [dt for dt in dates if dt and dt < observed_at]
+        if dates:
+            learning_days.append(max((observed_at - min(dates)).total_seconds() / 86400, 0.0))
+    observed_days = float(statistics.median(learning_days)) if learning_days else 0.0
+    lifetime_signal = sum(sold_quantity(item) for item in items)
+    learning = bool(items or target_ids)
     return {
-        "estimate": total,
-        "low": low,
-        "high": high,
-        "confidence": "learning" if total > 0 else "unknown",
-        "quality": next(iter(qualities)) if len(qualities) == 1 else "mixed_estimate" if qualities else "insufficient",
+        "estimate": 0.0,
+        "low": 0.0,
+        "high": 0.0,
+        "confidence": "learning" if learning else "unknown",
+        "quality": "learning_baseline" if learning else "insufficient",
         "observed_days": round(observed_days, 1),
-        "observed_days_min": round(min(fallback_days), 1) if fallback_days else 0.0,
-        "observed_days_max": round(max(fallback_days), 1) if fallback_days else 0.0,
+        "observed_days_min": round(min(learning_days), 1) if learning_days else 0.0,
+        "observed_days_max": round(max(learning_days), 1) if learning_days else 0.0,
         "observed_delta": 0,
+        "lifetime_sold_signal": lifetime_signal,
+        "days_until_usable": round(max(0.0, 7.0 - observed_days), 1),
         "auto_verified": False,
         "sampled_listings": len(items),
         "tracked_listings": 0,
@@ -723,7 +628,6 @@ def build_candidate(
     observed_at: datetime,
     queries: list[str],
     rakuten: dict[str, Any] | None,
-    insights: dict[str, Any] | None,
     previous: dict[str, Any] | None,
     default_shipping_jpy: int,
 ) -> dict[str, Any]:
@@ -731,18 +635,14 @@ def build_candidate(
     active_count = int(competition.get("active_count") or 0)
     competition_known = bool(competition.get("known"))
     competition_confidence = str(competition.get("confidence") or "unknown")
-    snapshot_sales = aggregate_sales_estimate(part_number, items, snapshots, observed_at)
-    insights_data = insights or {"available": False, "status": "not_attempted", "usable": False, "prices_usd": []}
-    use_official_sales = bool(insights_data.get("available") and insights_data.get("usable"))
-    sales = insights_data if use_official_sales else snapshot_sales
+    sales = aggregate_sales_estimate(part_number, items, snapshots, observed_at)
     sold_90d = safe_float(sales.get("estimate"), 0.0)
-    sold_prices = [safe_float(value) for value in sales.get("prices_usd", []) if safe_float(value) > 0]
-    market_prices = sold_prices or prices
+    market_prices = prices
 
     rep = representative_item(items)
     score = market_score(sold_90d, active_count, market_prices)
     score -= {"unknown": 15, "low": 8, "medium": 3}.get(competition_confidence, 0)
-    score -= {"unknown": 18, "learning": 12, "low": 8, "medium": 3, "confirmed": 0}.get(str(sales.get("confidence")), 0)
+    score -= {"unknown": 18, "learning": 12, "low": 8, "medium": 3}.get(str(sales.get("confidence")), 0)
     score = max(0, min(100, score))
 
     unique_sellers = len({seller_key(item) for item in items if seller_key(item) != "unknown"})
@@ -761,10 +661,7 @@ def build_candidate(
     sales_confidence = raw_sales_confidence
     if raw_sales_confidence == "high" and not market_coverage_ok:
         sales_confidence = "medium"
-    sales_auto_verified = (
-        raw_sales_confidence == "confirmed"
-        or (sales_confidence == "high" and market_coverage_ok)
-    )
+    sales_auto_verified = sales_confidence == "high" and market_coverage_ok
 
     judgment = market_judgment(
         score,
@@ -785,12 +682,12 @@ def build_candidate(
     procurement_price = int(safe_float(best_rakuten.get("price_jpy"), 0))
     domestic_shipping = 0 if best_rakuten.get("postage_included") is True else (800 if procurement_price else 0)
 
-    if procurement_price <= 0:
+    if sales_confidence in {"unknown", "learning", "low"}:
+        next_action = "自動学習中"
+    elif procurement_price <= 0:
         next_action = "仕入価格を確認"
     elif not origin_code:
         next_action = "原産国を確認"
-    elif sales.get("confidence") in {"unknown", "learning", "low"}:
-        next_action = "自動学習中"
     else:
         next_action = "最終利益を確認"
 
@@ -814,9 +711,11 @@ def build_candidate(
         "sales_observed_days_min": sales.get("observed_days_min", 0),
         "sales_observed_days_max": sales.get("observed_days_max", 0),
         "sales_observed_delta": sales.get("observed_delta", 0),
+        "sales_lifetime_signal": sales.get("lifetime_sold_signal", 0),
+        "sales_days_until_usable": sales.get("days_until_usable", 0),
         "sales_tracked_listings": tracked_listings,
         "sales_short_history_listings": sales.get("short_history_listings", 0),
-        "sales_scope": "marketplace_insights_90d" if use_official_sales else "tracked_listing_90d_run_rate",
+        "sales_scope": "production_browse_tracked_listing_run_rate",
         "sales_auto_verified": sales_auto_verified,
         "sales_confirmation_required": not sales_auto_verified,
         "sampled_listings": sales.get("sampled_listings", len(items)),
@@ -833,21 +732,12 @@ def build_candidate(
         "price_median_usd": round(median(market_prices), 2),
         "price_p25_usd": round(percentile(market_prices, 0.25), 2),
         "price_p75_usd": round(percentile(market_prices, 0.75), 2),
-        "price_source": "marketplace_insights_last_sold" if sold_prices else "browse_active_listing",
+        "price_source": "browse_active_listing",
         "active_price_median_usd": round(median(prices), 2),
-        "sold_price_median_usd": round(median(sold_prices), 2),
+        "sold_price_median_usd": 0.0,
         "market_score": score,
         "market_judgment": judgment,
-        "source": "ebay_marketplace_insights_90d" if use_official_sales else "ebay_browse_snapshot_run_rate",
-        "marketplace_insights": {
-            "available": bool(insights_data.get("available")),
-            "status": str(insights_data.get("status") or "not_attempted"),
-            "used": use_official_sales,
-            "search_total": int(safe_float(insights_data.get("search_total"), 0)),
-            "search_returned": int(safe_float(insights_data.get("search_returned"), 0)),
-            "exact_match_count": int(safe_float(insights_data.get("exact_match_count"), 0)),
-            "last_sold_date": str(insights_data.get("last_sold_date") or ""),
-        },
+        "source": "ebay_production_browse_snapshot_run_rate",
         "country_of_origin": origin_code,
         "origin_confidence": origin_confidence,
         "tariff": tariff,
@@ -861,6 +751,8 @@ def build_candidate(
             "shipping_confidence": shipping["confidence"],
             "tariff_rate": tariff["rate"],
         },
+        "current_active": bool(items),
+        "last_seen_at": observed_at.isoformat().replace("+00:00", "Z"),
         "next_action": next_action,
     }
 
@@ -906,44 +798,238 @@ def normalize_watchlist(payload: Any) -> list[dict[str, Any]]:
     return output
 
 
+def classify_ebay_error(error: EbayApiError) -> str:
+    status = error.status_code
+    if error.stage == "oauth":
+        if status in {400, 401, 403}:
+            return "invalid_credentials"
+        return "oauth_temporary_error"
+    # Developer Analytics is optional and has separate permissions. A 403 here
+    # must not be misreported as missing Browse production access.
+    if error.stage == "developer_analytics":
+        if status in {401, 403, 404}:
+            return "analytics_unavailable"
+        if status == 429:
+            return "analytics_rate_limited"
+        if status and 400 <= status < 500:
+            return "analytics_request_rejected"
+        return "analytics_temporary_error"
+    if status == 403:
+        return "browse_not_approved"
+    if status == 401:
+        return "token_rejected"
+    if status == 429:
+        return "rate_limited"
+    if status and 400 <= status < 500:
+        return "request_rejected"
+    return "temporary_error"
+
+
+def research_run_status(
+    *,
+    selected_query_count: int,
+    discovery_failures: int,
+    target_part_count: int,
+    exact_search_failures: int,
+    candidate_count: int,
+) -> str:
+    """Summarize whether a research run is safe to publish.
+
+    Successful empty searches are valid. We only classify a run as failed when
+    API calls themselves failed, so a temporary eBay outage cannot wipe a prior
+    candidate list.
+    """
+    discovery_successes = max(int(selected_query_count) - int(discovery_failures), 0)
+    exact_successes = max(int(target_part_count) - int(exact_search_failures), 0)
+    if selected_query_count > 0 and discovery_successes == 0 and target_part_count == 0:
+        return "discovery_unavailable"
+    if target_part_count > 0 and exact_successes == 0:
+        return "exact_search_unavailable"
+    if discovery_failures or exact_search_failures:
+        return "partial_success" if candidate_count > 0 else "partial_failure"
+    return "success"
+
+
+def should_preserve_previous_results(
+    previous_payload: dict[str, Any],
+    candidates: list[dict[str, Any]],
+    research_status: str,
+) -> bool:
+    previous_products = list(previous_payload.get("products") or [])
+    return bool(previous_products) and not candidates and research_status in {
+        "discovery_unavailable",
+        "exact_search_unavailable",
+        "partial_failure",
+    }
+
+
+def ebay_api_health(
+    *,
+    credentials_configured: bool,
+    oauth_ok: bool = False,
+    browse_ok: bool = False,
+    error: EbayApiError | None = None,
+    quota: dict[str, Any] | None = None,
+    checked_at: datetime | None = None,
+) -> dict[str, Any]:
+    checked_at = checked_at or datetime.now(timezone.utc)
+    if not credentials_configured:
+        status = "missing_credentials"
+        action = "GitHub SecretsへEBAY_CLIENT_IDとEBAY_CLIENT_SECRETを登録"
+        message = "Productionキーが未登録です。"
+    elif error is not None:
+        status = classify_ebay_error(error)
+        actions = {
+            "invalid_credentials": "Production App IDとCert IDの組み合わせを確認",
+            "browse_not_approved": "eBayへBuy/Browse APIのProduction利用申請を行う",
+            "token_rejected": "Productionキーを再登録して再実行",
+            "rate_limited": "割当リセット後に自動再実行",
+            "request_rejected": "ActionsログのeBayエラー内容を確認",
+            "oauth_temporary_error": "次回の自動実行を待つ",
+            "temporary_error": "次回の自動実行を待つ",
+        }
+        messages = {
+            "invalid_credentials": "Production OAuth認証に失敗しました。",
+            "browse_not_approved": "OAuthは成功しましたが、Browse APIのProduction利用権限がありません。",
+            "token_rejected": "Browse APIがアクセストークンを拒否しました。",
+            "rate_limited": "Browse APIの呼出上限に達しました。",
+            "request_rejected": "Browse APIがリクエストを拒否しました。",
+            "oauth_temporary_error": "OAuth接続で一時エラーが発生しました。",
+            "temporary_error": "eBay APIで一時エラーが発生しました。",
+        }
+        action = actions.get(status, "Actionsログを確認")
+        message = messages.get(status, "eBay APIを確認してください。")
+    elif oauth_ok and browse_ok:
+        status = "ready"
+        action = "なし。毎日の自動調査を継続"
+        message = "Production OAuthとBrowse APIの両方に接続できています。"
+    else:
+        status = "checking"
+        action = "自動診断中"
+        message = "Production APIを確認しています。"
+    return {
+        "environment": "production",
+        "credential_mode": "client_credentials",
+        "credentials_configured": credentials_configured,
+        "oauth_status": "ok" if oauth_ok else "not_ready",
+        "browse_status": "ok" if browse_ok else "not_ready",
+        "ready": status == "ready",
+        "status": status,
+        "message": message,
+        "action_required": action,
+        "http_status": error.status_code if error else None,
+        "error_stage": error.stage if error else "",
+        "checked_at": checked_at.isoformat().replace("+00:00", "Z"),
+        "quota": quota or {"available": False, "status": "not_checked"},
+    }
+
+
+def merge_watchlist(
+    previous: list[dict[str, Any]],
+    candidates: list[dict[str, Any]],
+    observed_at: datetime,
+    *,
+    max_size: int = 60,
+    stale_days: int = 90,
+) -> list[dict[str, Any]]:
+    today = observed_at.date()
+    merged: dict[str, dict[str, Any]] = {}
+    for row in previous:
+        part = normalize_part_number(row.get("part_number"))
+        if not part:
+            continue
+        last_seen = str(row.get("last_seen") or "")
+        try:
+            age = (today - datetime.fromisoformat(last_seen).date()).days if last_seen else stale_days + 1
+        except ValueError:
+            age = stale_days + 1
+        if age <= stale_days:
+            merged[part] = {
+                **row,
+                "part_number": part,
+                "missed_runs": int(safe_float(row.get("missed_runs"), 0)) + 1,
+            }
+    for row in candidates:
+        part = normalize_part_number(row.get("part_number"))
+        if not part:
+            continue
+        merged[part] = {
+            **merged.get(part, {}),
+            "part_number": part,
+            "market_score": int(safe_float(row.get("market_score"), 0)),
+            "last_seen": today.isoformat(),
+            "last_checked": observed_at.isoformat().replace("+00:00", "Z"),
+            "missed_runs": 0,
+        }
+    rows = list(merged.values())
+    rows.sort(key=lambda row: (int(row.get("missed_runs", 0)) == 0, safe_float(row.get("market_score"), 0), str(row.get("last_seen", ""))), reverse=True)
+    return rows[:max_size]
+
+
+def build_status_payload(
+    previous_payload: dict[str, Any],
+    api_health: dict[str, Any],
+    observed_at: datetime,
+    *,
+    rakuten_enabled: bool,
+    research_status: str = "api_unavailable",
+    discovery_failures: int = 0,
+    exact_search_failures: int = 0,
+    selected_query_count: int = 0,
+    target_part_count: int = 0,
+) -> dict[str, Any]:
+    products = list(previous_payload.get("products") or [])
+    previous_automation = dict(previous_payload.get("automation") or {})
+    previous_api = dict(previous_automation.get("ebay_api") or {})
+    previous_success = previous_automation.get("last_successful_research_at") or (
+        previous_payload.get("generated_at") if previous_api.get("ready") is True else ""
+    )
+    data_status = "previous_real" if previous_success else "sample" if products else "empty"
+    if research_status in {"discovery_unavailable", "exact_search_unavailable", "partial_failure"}:
+        run_note = "今回の調査は一時障害で完了できなかったため、候補を消さず前回結果を保持しています。次回に自動再試行します。"
+    elif research_status == "api_unavailable":
+        run_note = "Production APIの初回設定または再接続を待っています。"
+    else:
+        run_note = ""
+    return {
+        **previous_payload,
+        "schema_version": 4,
+        "app_version": APP_VERSION,
+        "generated_at": observed_at.isoformat().replace("+00:00", "Z"),
+        "result_count": len(products),
+        "data_status": data_status,
+        "automation": {
+            **previous_automation,
+            "scheduled": True,
+            "ebay_api": api_health,
+            "rakuten_enabled": rakuten_enabled,
+            "sales_source": "production_browse_daily_snapshot",
+            "sales_source_priority": ["daily_snapshot_delta"],
+            "product_research_mode": "optional_local_override",
+            "high_confidence_after_days": 30,
+            "research_status": research_status,
+            "selected_query_count": int(selected_query_count),
+            "target_part_count": int(target_part_count),
+            "discovery_failures": int(discovery_failures),
+            "exact_search_failures": int(exact_search_failures),
+            "last_successful_research_at": previous_success,
+            "last_attempt_at": observed_at.isoformat().replace("+00:00", "Z"),
+        },
+        "method_note": (
+            run_note
+            + ("前回の実データを保持しています。" if data_status == "previous_real" else "現在の候補は操作確認用のサンプル表示です。")
+            + "eBay Productionキーだけで動く標準構成です。OAuthとBrowse APIの利用可否を自動診断し、"
+            "販売ペースはBrowse APIのestimatedSoldQuantityを毎日保存した差分だけから推定します。"
+            "観測7日未満は90日換算しません。関税はHTSUS・原産国・DDP確認前の仮計算です。"
+        ),
+        "products": products,
+    }
+
+
 def run() -> int:
-    client_id = os.getenv("EBAY_CLIENT_ID", "").strip()
-    client_secret = os.getenv("EBAY_CLIENT_SECRET", "").strip()
-    if not client_id or not client_secret:
-        print("EBAY_CLIENT_ID and EBAY_CLIENT_SECRET are required. Existing results were not overwritten.")
-        return 2
-
-    max_discovery_items = int(os.getenv("MAX_DISCOVERY_ITEMS", "40"))
-    max_discovery_details = int(os.getenv("MAX_DISCOVERY_DETAILS", "20"))
-    max_candidates = int(os.getenv("MAX_CANDIDATES", "24"))
-    max_exact_details = int(os.getenv("MAX_EXACT_DETAILS", "50"))
-    queries_per_run = int(os.getenv("QUERIES_PER_RUN", "8"))
-    marketplace = os.getenv("EBAY_MARKETPLACE", "EBAY_US")
-    category_id = os.getenv("EBAY_CATEGORY_ID", "6028")
-    forced_query = os.getenv("RESEARCH_QUERY", "")
-    default_shipping_jpy = int(os.getenv("DEFAULT_INTL_SHIPPING_JPY", "2800"))
-    fallback_exchange_rate = safe_float(os.getenv("FALLBACK_USDJPY", "150"), 150.0)
-
-    seeds = load_json(SEEDS_PATH, {})
-    research_state: dict[str, Any] = load_json(RESEARCH_STATE_PATH, {})
-    selected_queries = choose_queries(seeds, research_state, forced_query, count=queries_per_run)
-    if not selected_queries:
-        print("No search queries configured", file=sys.stderr)
-        return 3
-    print("Research queries:")
-    for query, label in selected_queries:
-        print(f"- {label}: {query}")
-
-    client = EbayBrowseClient(client_id, client_secret, marketplace=marketplace)
-    insights_enabled = os.getenv("ENABLE_MARKETPLACE_INSIGHTS", "true").strip().lower() not in {"0", "false", "no", "off"}
-    insights_client = EbayMarketplaceInsightsClient(client, enabled=insights_enabled)
-    rakuten_application_id = os.getenv("RAKUTEN_APPLICATION_ID", "").strip()
-    rakuten_access_key = os.getenv("RAKUTEN_ACCESS_KEY", "").strip()
-    rakuten_client = RakutenClient(rakuten_application_id, rakuten_access_key) if rakuten_application_id and rakuten_access_key else None
-
     observed_at = datetime.now(timezone.utc)
-    snapshots: dict[str, list[dict[str, Any]]] = load_json(SNAPSHOTS_PATH, {})
     previous_payload = load_json(RESULTS_PATH, {})
+    research_state: dict[str, Any] = load_json(RESEARCH_STATE_PATH, {})
     previous_products = {
         str(row.get("part_number")): row
         for row in previous_payload.get("products", [])
@@ -951,14 +1037,82 @@ def run() -> int:
     }
     previous_watchlist = normalize_watchlist(load_json(WATCHLIST_PATH, []))
 
+    client_id = os.getenv("EBAY_CLIENT_ID", "").strip()
+    client_secret = os.getenv("EBAY_CLIENT_SECRET", "").strip()
+    credentials_configured = bool(client_id and client_secret)
+    rakuten_application_id = os.getenv("RAKUTEN_APPLICATION_ID", "").strip()
+    rakuten_access_key = os.getenv("RAKUTEN_ACCESS_KEY", "").strip()
+    rakuten_enabled = bool(rakuten_application_id and rakuten_access_key)
+
+    if not credentials_configured:
+        health = ebay_api_health(credentials_configured=False, checked_at=observed_at)
+        save_json(RESULTS_PATH, build_status_payload(previous_payload, health, observed_at, rakuten_enabled=rakuten_enabled))
+        print("Production eBay credentials are missing; status JSON was updated and previous products were preserved.")
+        return 0
+
+    marketplace = os.getenv("EBAY_MARKETPLACE", "EBAY_US")
+    category_id = os.getenv("EBAY_CATEGORY_ID", "6028")
+    try:
+        client = EbayBrowseClient(client_id, client_secret, marketplace=marketplace)
+    except EbayApiError as exc:
+        health = ebay_api_health(credentials_configured=True, error=exc, checked_at=observed_at)
+        save_json(RESULTS_PATH, build_status_payload(previous_payload, health, observed_at, rakuten_enabled=rakuten_enabled))
+        print(f"eBay OAuth diagnostic: {health['status']}")
+        return 0
+
+    # A minimal Production Browse call distinguishes valid credentials from a
+    # keyset that has not been approved for Buy/Browse production access.
+    try:
+        client.search("Nissan OEM relay", limit=1, category_id=category_id)
+    except EbayApiError as exc:
+        health = ebay_api_health(
+            credentials_configured=True,
+            oauth_ok=True,
+            browse_ok=False,
+            error=exc,
+            checked_at=observed_at,
+        )
+        save_json(RESULTS_PATH, build_status_payload(previous_payload, health, observed_at, rakuten_enabled=rakuten_enabled))
+        print(f"eBay Browse diagnostic: {health['status']}")
+        return 0
+
+    quota = client.rate_limits()
+    health = ebay_api_health(
+        credentials_configured=True,
+        oauth_ok=True,
+        browse_ok=True,
+        quota=quota,
+        checked_at=observed_at,
+    )
+
+    max_discovery_items = int(os.getenv("MAX_DISCOVERY_ITEMS", "40"))
+    max_discovery_details = int(os.getenv("MAX_DISCOVERY_DETAILS", "20"))
+    max_candidates = int(os.getenv("MAX_CANDIDATES", "24"))
+    max_exact_details = int(os.getenv("MAX_EXACT_DETAILS", "50"))
+    queries_per_run = int(os.getenv("QUERIES_PER_RUN", "8"))
+    default_shipping_jpy = int(os.getenv("DEFAULT_INTL_SHIPPING_JPY", "2800"))
+    fallback_exchange_rate = float(os.getenv("FALLBACK_USDJPY", "150"))
+    forced_query = os.getenv("RESEARCH_QUERY", "")
+
+    seeds = load_json(SEEDS_PATH, {})
+    selected_queries = choose_queries(seeds, research_state, forced_query, queries_per_run)
+    print("Research queries:")
+    for query, label in selected_queries:
+        print(f"- {label}: {query}")
+
+    rakuten_client = RakutenClient(rakuten_application_id, rakuten_access_key) if rakuten_enabled else None
+    snapshots: dict[str, list[dict[str, Any]]] = load_json(SNAPSHOTS_PATH, {})
+
     discovery_groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
     part_queries: dict[str, set[str]] = defaultdict(set)
     all_observed_items: dict[str, dict[str, Any]] = {}
+    discovery_failures = 0
 
     for query, _label in selected_queries:
         try:
             payload = client.search(query, limit=max_discovery_items, category_id=category_id)
         except EbayApiError as exc:
+            discovery_failures += 1
             print(f"WARN discovery {query}: {exc}", file=sys.stderr)
             continue
         summaries = [
@@ -986,8 +1140,16 @@ def run() -> int:
         reverse=True,
     )
 
-    previous_parts = [row["part_number"] for row in sorted(previous_watchlist, key=lambda row: safe_float(row.get("market_score"), 0), reverse=True)]
+    previous_parts = [
+        row["part_number"]
+        for row in sorted(
+            previous_watchlist,
+            key=lambda row: (int(safe_float(row.get("missed_runs"), 0)) == 0, safe_float(row.get("market_score"), 0)),
+            reverse=True,
+        )
+    ]
     target_parts: list[str] = []
+    # Keep half of the daily capacity for persistent observation and half for discovery.
     for part in [*previous_parts[: max_candidates // 2], *ranked_new_parts, *previous_parts]:
         if part and part not in target_parts:
             target_parts.append(part)
@@ -995,15 +1157,15 @@ def run() -> int:
             break
 
     candidates: list[dict[str, Any]] = []
+    exact_failures = 0
     for index, part_number in enumerate(target_parts, start=1):
         print(f"[{index}/{len(target_parts)}] exact search {part_number}")
-        exact_search_ok = True
         try:
             exact_payload = client.search(part_number, limit=200, category_id=category_id)
         except EbayApiError as exc:
-            exact_search_ok = False
+            exact_failures += 1
             print(f"WARN exact search {part_number}: {exc}", file=sys.stderr)
-            exact_payload = {"itemSummaries": [], "total": len(discovery_groups.get(part_number, []))}
+            continue
 
         returned_summaries = list(exact_payload.get("itemSummaries", []))
         exact_summaries = [item for item in returned_summaries if title_contains_part_number(item.get("title", ""), part_number)]
@@ -1023,34 +1185,17 @@ def run() -> int:
                 all_observed_items[item_id] = item
                 part_queries[part_number].add(part_number)
 
-        insights_result = insights_client.search_part(part_number, observed_at)
-        official_only_candidate = bool(
-            insights_result.get("available")
-            and insights_result.get("usable")
-            and previous_products.get(part_number)
-        )
-        if not matching_details and not official_only_candidate:
+        if not matching_details:
             continue
         if not exact_prices:
             exact_prices = [item_price_usd(item) for item in matching_details if item_price_usd(item) > 0]
 
-        if not matching_details and exact_search_ok and int(safe_float(exact_payload.get("total"), 0)) == 0:
-            competition = {
-                "active_count": 0,
-                "known": True,
-                "match_rate": 1.0,
-                "confidence": "confirmed",
-                "search_total": 0,
-                "search_returned": 0,
-                "search_matched": 0,
-            }
-        else:
-            competition = estimate_competition(
-                exact_payload.get("total"),
-                len(returned_summaries),
-                len(exact_summaries),
-                len(matching_details),
-            )
+        competition = estimate_competition(
+            exact_payload.get("total"),
+            len(returned_summaries),
+            len(exact_summaries),
+            len(matching_details),
+        )
 
         rakuten_result: dict[str, Any] | None = None
         if rakuten_client:
@@ -1068,48 +1213,63 @@ def run() -> int:
             observed_at=observed_at,
             queries=sorted(part_queries.get(part_number, {part_number})),
             rakuten=rakuten_result,
-            insights=insights_result,
             previous=previous_products.get(part_number),
             default_shipping_jpy=default_shipping_jpy,
         )
         if candidate["price_median_usd"] > 0:
             candidates.append(candidate)
 
-    # Save current observation after estimates so each run compares against prior days.
-    for item in all_observed_items.values():
-        parts = extract_part_numbers(item)
-        append_snapshot(snapshots, item, observed_at, parts)
-
     candidates.sort(
         key=lambda row: (
+            row["sales_confidence"] == "high",
             row["market_score"],
-            row["sales_confidence"] in {"confirmed", "high"},
             row["sold_90d_est"],
             -row["active_competition"],
         ),
         reverse=True,
     )
     candidates = candidates[:max_candidates]
+    research_status = research_run_status(
+        selected_query_count=len(selected_queries),
+        discovery_failures=discovery_failures,
+        target_part_count=len(target_parts),
+        exact_search_failures=exact_failures,
+        candidate_count=len(candidates),
+    )
+    if should_preserve_previous_results(previous_payload, candidates, research_status):
+        status_payload = build_status_payload(
+            previous_payload,
+            health,
+            observed_at,
+            rakuten_enabled=rakuten_enabled,
+            research_status=research_status,
+            discovery_failures=discovery_failures,
+            exact_search_failures=exact_failures,
+            selected_query_count=len(selected_queries),
+            target_part_count=len(target_parts),
+        )
+        save_json(RESULTS_PATH, status_payload)
+        print(f"Research status {research_status}; previous products were preserved for automatic retry.")
+        return 0
 
-    watchlist = [
-        {
-            "part_number": row["part_number"],
-            "market_score": row["market_score"],
-            "last_seen": observed_at.date().isoformat(),
-        }
-        for row in candidates
-    ]
+    # Save only after the run is usable, so temporary failures cannot pollute
+    # the observation history or erase the prior watchlist.
+    for item in all_observed_items.values():
+        append_snapshot(snapshots, item, observed_at, extract_part_numbers(item))
+
+    watchlist = merge_watchlist(previous_watchlist, candidates, observed_at, max_size=60, stale_days=90)
 
     exchange_rate = fetch_usd_jpy_rate(fallback_exchange_rate)
     research_state.update({
         "last_run": observed_at.isoformat().replace("+00:00", "Z"),
+        "last_successful_run": observed_at.isoformat().replace("+00:00", "Z"),
         "last_queries": [query for query, _label in selected_queries],
         "runs_completed": int(safe_float(research_state.get("runs_completed"), 0)) + 1,
     })
 
     output = {
-        "schema_version": 3,
-        "app_version": "0.3.1",
+        "schema_version": 4,
+        "app_version": APP_VERSION,
         "generated_at": observed_at.isoformat().replace("+00:00", "Z"),
         "marketplace": marketplace,
         "category_id": category_id,
@@ -1117,16 +1277,25 @@ def run() -> int:
         "query": " / ".join(query for query, _label in selected_queries[:3]),
         "query_label": f"自動ローテーション {len(selected_queries)}語",
         "result_count": len(candidates),
+        "data_status": "real",
         "automation": {
             "scheduled": True,
+            "ebay_api": health,
             "queries_per_run": len(selected_queries),
             "watchlist_size": len(watchlist),
             "snapshot_runs": research_state["runs_completed"],
             "rakuten_enabled": rakuten_client is not None,
-            "marketplace_insights": insights_client.summary(),
-            "sales_source_priority": ["marketplace_insights_90d", "daily_snapshot_delta"],
-            "product_research_required_for_auto_verified": False,
+            "sales_source": "production_browse_daily_snapshot",
+            "sales_source_priority": ["daily_snapshot_delta"],
+            "product_research_mode": "optional_local_override",
             "high_confidence_after_days": 30,
+            "research_status": research_status,
+            "selected_query_count": len(selected_queries),
+            "target_part_count": len(target_parts),
+            "last_successful_research_at": observed_at.isoformat().replace("+00:00", "Z"),
+            "last_attempt_at": observed_at.isoformat().replace("+00:00", "Z"),
+            "discovery_failures": discovery_failures,
+            "exact_search_failures": exact_failures,
         },
         "cost_defaults": {
             "exchange_rate": exchange_rate,
@@ -1143,10 +1312,11 @@ def run() -> int:
             "default_packaging_jpy": 150,
         },
         "method_note": (
-            "Marketplace Insightsの利用承認がある場合は、eBay公式の過去90日成約数と最終成約価格を自動使用します。"
-            "未承認の場合は操作不要で日次スナップショット差分へ切り替え、7日未満は換算せず、"
-            "30日以上かつ同一品番の市場カバーが十分な場合だけ高精度とします。"
-            "Product Researchは任意の照合機能です。関税率はHTSUS・原産国・DDP確認前のスクリーニング仮置きです。"
+            ("一部の検索は一時失敗しましたが、取得できた候補を保存し、次回に自動再試行します。" if research_status == "partial_success" else "")
+            + "eBay ProductionキーとBrowse APIだけで自動調査します。販売ペースは同一品番の"
+            "estimatedSoldQuantityを毎日保存し、観測開始後の正の増分だけを90日換算します。"
+            "7日未満は販売数を表示せず、30日以上かつ市場カバーが十分な場合だけ自動精度・高とします。"
+            "Product Researchは日常操作には不要な任意補正です。関税はHTSUS・原産国・DDP確認前の仮計算です。"
         ),
         "products": candidates,
     }

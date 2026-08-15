@@ -141,7 +141,9 @@ function calculateProfit(product) {
     + feeBaseUsd * number(state.settings.additionalFvfRate) / 100;
   const perOrderFeeUsd = feeBaseUsd <= 10 ? 0.30 : 0.40;
   const finalValueFeeJpy = (percentageFeeUsd + perOrderFeeUsd) * exchangeRate;
-  const internationalRate = internationalFeeRate(state.settings.monthlySalesUsd);
+  const internationalRate = state.settings.internationalFeeDiscountEligible === false
+    ? 1.35
+    : internationalFeeRate(state.settings.monthlySalesUsd);
   const internationalFeeJpy = feeBaseUsd * internationalRate / 100 * exchangeRate;
   const promotedFeeJpy = feeBaseUsd * number(state.settings.promotedRate) / 100 * exchangeRate;
   const insertionFeeJpy = Math.max(0, number(state.settings.insertionFeeUsd)) * exchangeRate;
@@ -151,8 +153,7 @@ function calculateProfit(product) {
 
   const payoutBeforePayoneer = Math.max(0, grossJpy - ebayFee);
   const manualAnnualAllocation = Math.max(0, number(state.settings.payoneerAnnualAllocationJpy));
-  const annualFeeApplicable = state.settings.includePayoneerAnnualFee !== false
-    && number(state.settings.monthlySalesUsd) * 12 < 6000;
+  const annualFeeApplicable = state.settings.includePayoneerAnnualFee !== false;
   const estimatedAnnualOrders = number(state.settings.monthlySalesUsd) > 0
     ? Math.max(12, number(state.settings.monthlySalesUsd) * 12 / Math.max(salePriceUsd + buyerShippingUsd, 1))
     : 12;
@@ -253,6 +254,7 @@ function badgeClass(judgment) {
 }
 
 function combinedJudgment(product, profit) {
+  if (!profit.salesVerified && !CONFIRMED_SALES_QUALITIES.has(product.sales_quality)) return "学習中";
   if (profit.hasCosts) {
     if (profit.passes) return "購入候補";
     if (profit.profit <= 0) return "見送り";
@@ -260,15 +262,14 @@ function combinedJudgment(product, profit) {
     return "再検討";
   }
   if (!profit.hasProcurement) return "仕入確認";
-  if (product.sales_confidence === "learning" || product.sales_confidence === "low") return "学習中";
   return product.market_judgment || "データ不足";
 }
 
 function nextAction(product, profit) {
+  if (!profit.salesVerified && !CONFIRMED_SALES_QUALITIES.has(product.sales_quality)) return "自動差分を蓄積中。操作は不要";
   if (!profit.hasProcurement) return "楽天／モノタロウで仕入価格を確認";
   if (profit.profit <= 0) return "仕入価格か販売価格を見直す";
   if (profit.operationalFailed.length) return `${profit.operationalFailed[0]}が基準未達。次候補へ進む`;
-  if (!profit.salesVerified) return "自動差分を蓄積中。操作は不要";
   if (profit.values.supplierConfirmed !== true) return "仕入先で価格・在庫・送料を確認";
   if (profit.values.tariffConfirmed !== true) return "原産国とDDP関税を確認";
   if (profit.passes) return "購入候補。仕入判断へ進む";

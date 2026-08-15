@@ -356,29 +356,26 @@ def estimate_sales_pace(
                 "auto_verified": observed_days >= 30,
             }
 
+    # Do not turn a listing's pre-observation lifetime quantity into a 90-day
+    # sales number.  That quantity can include sales from before this tool began
+    # observing the listing and would make a young listing look artificially hot.
+    # Keep it only as a non-ranking signal while the daily snapshot history grows.
     created = parse_iso8601(item.get("itemCreationDate") or item.get("itemStartDate"))
-    if created and current_qty > 0:
-        age_days = max((now - created).total_seconds() / 86400, 1.0)
-        estimate = float(current_qty) if age_days <= 90 else round(current_qty / age_days * 90, 2)
-        return {
-            "estimate": estimate,
-            "low": 0.0,
-            "high": round(max(estimate * 2.0, estimate + 3.0), 2),
-            "quality": "listing_lifetime_under_90d" if age_days <= 90 else "lifetime_velocity_estimate",
-            "confidence": "learning",
-            "observed_days": round(min(age_days, 90), 1),
-            "observed_delta": 0,
-            "auto_verified": False,
-        }
-
+    listing_age_days = 0.0
+    if created:
+        listing_age_days = max((now - created).total_seconds() / 86400, 0.0)
+    learning = bool(current_item_id or current_qty or created)
     return {
         "estimate": 0.0,
         "low": 0.0,
         "high": 0.0,
-        "quality": "insufficient",
-        "confidence": "unknown",
+        "quality": "learning_baseline" if learning else "insufficient",
+        "confidence": "learning" if learning else "unknown",
         "observed_days": 0.0,
         "observed_delta": 0,
+        "lifetime_sold_signal": current_qty,
+        "listing_age_days": round(listing_age_days, 1),
+        "days_until_usable": 7.0,
         "auto_verified": False,
     }
 
@@ -485,10 +482,13 @@ def market_score(sold_90d: float, active_count: int, prices: Sequence[float]) ->
 
 
 def market_judgment(score: int, sold_90d: float, active_count: int, quality: str, confidence: str = "") -> str:
-    if quality == "insufficient" or sold_90d < 1:
-        return "データ不足"
-    if confidence in {"unknown", "learning", "low"}:
+    if quality in {"insufficient", "learning_baseline"} or confidence in {"unknown", "learning"}:
+        return "学習中" if quality == "learning_baseline" or confidence == "learning" else "データ不足"
+    if confidence == "low":
         return "学習中"
+    # A sufficiently observed zero is useful evidence of low demand, not missing data.
+    if sold_90d < 1:
+        return "見送り"
     if score >= 72 and sold_90d >= 5 and active_count <= 80:
         return "有望"
     if score >= 55 and sold_90d >= 2:

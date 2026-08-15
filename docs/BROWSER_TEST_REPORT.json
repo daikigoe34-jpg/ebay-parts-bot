@@ -1,0 +1,31 @@
+{
+  "viewport": {
+    "width": 390,
+    "height": 844
+  },
+  "checks": {
+    "initial_health": "初回設定必要",
+    "initial_next_task": "Productionキーを2つ登録",
+    "credentials_status": "未登録",
+    "oauth_status": "未確認",
+    "browse_status": "未確認",
+    "scroll_width": 390,
+    "client_width": 390,
+    "tabs": {
+      "today": true,
+      "all": true,
+      "accuracy": true,
+      "settings": true
+    },
+    "discount_persisted_off": true,
+    "annual_fee_persisted_off": true,
+    "ready_health": "自動運転中",
+    "ready_browse": "利用可能",
+    "denied_health": "Browse申請必要",
+    "denied_task": "Browse APIのProduction利用申請が必要",
+    "no_console_errors": true,
+    "no_page_errors": true
+  },
+  "console_errors": [],
+  "page_errors": []
+}

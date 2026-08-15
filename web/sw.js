@@ -1,6 +1,6 @@
 "use strict";
 
-const CACHE_NAME = "part-scout-shell-v6";
+const CACHE_NAME = "part-scout-shell-v8";
 const RESULTS_CACHE_URL = new URL("./data/results.json", self.location.href).href;
 const SHELL = [
   "./",

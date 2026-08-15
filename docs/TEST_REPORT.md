@@ -1,84 +1,54 @@
-# 検証結果
-
-検証日：2026-08-15  
-対象：Part Scout Mobile 0.3.1
+# Part Scout Mobile v0.4.1 テスト報告
 
 ## 自動テスト
 
-### Python：25件合格
+- Python：30件合格
+- JavaScriptロジック：合格
+- Python構文：合格
+- JavaScript構文：合格
+- JSON：合格
+- GitHub Actions YAML：合格
 
-- 日本車純正品番抽出
-- Item Specifics優先
-- 年式、電圧、寸法、適合語の誤抽出防止
-- 7日未満の販売差分を90日へ過大換算しない処理
-- 30日以上の差分を高信頼へ分類
-- 出品ごとの観測期間を使う販売ペース計算
-- 終了・消失出品の販売増分保持
-- 競合検索総数を同一品番一致率で補正
-- 一致ゼロ時の誤競合数防止
-- eBay段階料率、固定手数料、売上税込み手数料ベース
-- eBay手数料への日本の消費税10%
-- PayoneerをeBay手数料後の入金額へ別計算
-- 海外決済手数料の前々月売上ボリューム割引
-- 原産国の構造化情報抽出
-- 日本15%、原産国不明25%の関税一次判定
-- 検索語の重複しないローテーション
-- Marketplace Insights公式90日成約数の完全一致集計
-- 重複Item IDの二重加算防止
-- 公式ゼロ件と完全一致なしのフォールバック判定
-- 関税が確定値ではなくスクリーニング仮置きであることの検証
+## 重点確認
 
-### JavaScript：合格
+- 観測前の累計販売数を90日販売数へ使用しない
+- 観測7日未満は0件・学習中
+- 7日以上は正の差分だけを換算
+- 再出品等による販売数減少をマイナス販売にしない
+- 終了出品の観測差分を保持
+- 30日以上の観測ゼロを見送り方向へ評価
+- Productionキー未登録とキー不一致を分離
+- OAuth成功後のBrowse 403を本番権限不足として分類
+- API障害時も既存候補を消さない
+- 全探索失敗・全品番検索失敗時は監視履歴と販売差分も更新しない
+- 成功した0件検索と、障害による0件を区別する
+- Developer Analyticsの権限不足をBrowse本番権限不足と誤分類しない
+- 一部成功時は候補を保存し、失敗分だけ自動再試行する
+- 監視品番を90日保持し、期限切れだけ削除
+- eBay、Payoneer、消費税、広告、出品料、関税を分離計算
+- v0.4.1をiPhone相当390×844で実ブラウザ検証し、横はみ出し・JavaScriptエラーなし
+- 4画面構造、初回設定、接続済み、Browse本番権限なしの各表示を確認
+- International Fee割引OFFとPayoneer年会費OFFの端末内保存を確認
+- 長い再試行表示へ`max-width`・折返しを追加
+- 後続の再実行は実行環境のlocalhost管理ポリシーで拒否されたが、成功済みレポートを`docs/BROWSER_TEST_REPORT.json`へ保存
+- API未設定時はサンプル表示と明示し、販売学習を「開始前」と表示
 
-- 品番抽出
-- CSV解析／取込
-- Product Research任意補正
-- eBay公式90日実績と30日自動差分による購入候補判定
-- 学習中候補を概算候補に止める処理
-- eBay標準・Basic料率
-- Basicの車載テックカテゴリー料率自動選択
-- 取引固定料
-- 無料枠超過時の出品手数料
-- 日本の消費税
-- Payoneer出金費と年間手数料配賦
-- 関税・利益判定
+## 未実施の外部確認
 
-## 構文・データ検証
+実Production API通信は利用者のGitHub SecretsとeBay側Browse Production権限に依存します。初回Actions実行で自動診断し、結果をiPhone画面へ表示します。
 
-- `scripts/core.py`：合格
-- `scripts/research.py`：合格
-- `web/app-01.js`：合格
-- `web/app-02.js`：合格
-- `web/app-03.js`：合格
-- `web/app.js`：合格
-- `web/sw.js`：合格
-- `web/data/results.json`：合格
-- `web/manifest.webmanifest`：合格
-- `config/search_seeds.json`：合格
+## iPhone実ブラウザ
 
-## iPhone相当ブラウザ検証
+- 390×844pxで横方向のはみ出しなし
+- `1 今日やる`→`2 全候補`→`3 任意補正`→`4 設定`の切替成功
+- Productionキー未登録、接続済み、Browse本番権限なしの案内を確認
+- International Fee割引OFFとPayoneer年会費OFFの保存を確認
+- JavaScript例外・コンソールエラーなし
 
-画面サイズ：390×844px
+詳細：`docs/BROWSER_TEST_REPORT.json`
 
-- デモ候補4件を描画
-- `今日やる`に上位候補と最初の操作を表示
-- 4タブの切替
-- 利益詳細の展開
-- 楽天／モノタロウ／eBayリンク生成
-- 仕入価格、送料、原産国、関税確認による再計算
-- eBay料率区分の表示
-- 横方向の表示はみ出しなし
-- JavaScript実行エラーなし
+## 料金ロジック追加確認
 
-## Secrets登録後に確認する項目
-
-- Production eBay APIでの実データ取得
-- 楽天APIキーによる品番一致価格取得
-- GitHub Actionsの日次保存
-- Pagesの実公開
-- 実機iPhone Safariのホーム画面追加
-- Marketplace Insights利用可否の実API確認
-- 未承認時の自動フォールバック
-- 30日間の継続スナップショットによる高精度判定
-
-秘密鍵を成果物へ含めないため、外部APIの実通信は利用者のGitHub Secrets登録後に確認します。
+- International Feeの割引対象外時は1.35%へ戻る
+- Payoneer年会費は実アカウントに応じた明示ON／OFF
+- eBay売上からPayoneer年会費適用可否を推測しない

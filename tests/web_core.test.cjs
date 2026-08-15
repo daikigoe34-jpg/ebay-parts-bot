@@ -178,7 +178,7 @@ const app = require(path.resolve(__dirname, "../web/app.js"));
     market_score: 80,
     demand_ratio: 0.5,
     price_median_usd: 100,
-    sales_quality: "listing_lifetime_under_90d",
+    sales_quality: "learning_baseline",
     sales_confidence: "learning",
     sales_auto_verified: false,
     competition_confidence: "high",
@@ -186,7 +186,7 @@ const app = require(path.resolve(__dirname, "../web/app.js"));
   const result = app.calculateProfit(product);
   assert.equal(result.provisional, true);
   assert.match(result.judgment, /^概算候補/);
-  assert.equal(app.combinedJudgment(product, result), "概算候補");
+  assert.equal(app.combinedJudgment(product, result), "学習中");
   assert.equal(app.nextAction(product, result), "自動差分を蓄積中。操作は不要");
 }
 
@@ -279,8 +279,24 @@ const app = require(path.resolve(__dirname, "../web/app.js"));
   });
   assert.equal(result.feeProfile.rate, 11.5);
   assert.equal(result.internationalRate, 0.4);
+  assert.equal(result.annualFeeApplicable, true);
   assert.ok(result.ebayFeeTaxJpy > 0);
   assert.ok(result.payoneerFee > 0);
+
+  app.state.settings.internationalFeeDiscountEligible = false;
+  const noDiscount = app.calculateProfit({
+    part_number: "FEE-CHECK-1", sold_90d_est: 0, competition_known: true,
+    market_score: 0, demand_ratio: 0, price_median_usd: 100, sales_quality: "insufficient",
+  });
+  assert.equal(noDiscount.internationalRate, 1.35);
+
+  app.state.settings.includePayoneerAnnualFee = false;
+  const noAnnualFee = app.calculateProfit({
+    part_number: "FEE-CHECK-2", sold_90d_est: 0, competition_known: true,
+    market_score: 0, demand_ratio: 0, price_median_usd: 100, sales_quality: "insufficient",
+  });
+  assert.equal(noAnnualFee.annualFeeApplicable, false);
+  assert.equal(noAnnualFee.payoneerAnnualAllocation, 0);
 }
 
 console.log("web core tests: passed");
@@ -324,10 +340,23 @@ console.log("web core tests: passed");
 }
 
 {
-  const official = {
-    sales_quality: "marketplace_insights_90d",
+  const manualOverride = {
+    sales_quality: "product_research_manual",
     sales_confidence: "confirmed",
     sales_auto_verified: false,
   };
-  assert.equal(app.isSalesAutoVerified(official), true);
+  const learning = {
+    sales_quality: "learning_baseline",
+    sales_confidence: "learning",
+    sales_auto_verified: false,
+  };
+  assert.equal(app.isSalesAutoVerified(manualOverride), true);
+  assert.equal(app.isSalesAutoVerified(learning), false);
+}
+
+
+{
+  assert.equal(app.RESEARCH_STATUS_LABELS.partial_success, "一部取得・自動再試行");
+  assert.equal(app.RESEARCH_RETRY_STATUSES.has("exact_search_unavailable"), true);
+  assert.equal(app.RESEARCH_RETRY_STATUSES.has("success"), false);
 }
