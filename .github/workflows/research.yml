@@ -29,8 +29,10 @@ jobs:
       RAKUTEN_ACCESS_KEY: ${{ secrets.RAKUTEN_ACCESS_KEY }}
       EBAY_MARKETPLACE: EBAY_US
       EBAY_CATEGORY_ID: "6028"
-      # 承認済みならeBay公式90日成約APIを使用。未承認時は自動で日次差分へ切替。
-      ENABLE_MARKETPLACE_INSIGHTS: "true"
+      # Productionキーセットだけで使う標準モード。
+      # Marketplace Insightsは別途承認が必要で、新規利用者には開放されていないため試行しません。
+      # 将来eBayから個別承認された場合だけ"true"へ変更します。
+      ENABLE_MARKETPLACE_INSIGHTS: "false"
       RESEARCH_QUERY: ${{ github.event_name == 'workflow_dispatch' && inputs.query || '' }}
       QUERIES_PER_RUN: "8"
       MAX_DISCOVERY_ITEMS: "40"
