@@ -8,6 +8,12 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / ".github" / "workflows"
 SHA_PIN = re.compile(r"^\s*uses:\s*[^@\s]+@[0-9a-f]{40}\s*$", re.MULTILINE)
 USES_LINE = re.compile(r"^\s*uses:\s*\S+\s*$", re.MULTILINE)
+PUBLIC_SECRET_PATTERNS = (
+    re.compile(r"\$\{\{\s*secrets\.", re.IGNORECASE),
+    re.compile(r"\$\{\{\s*github\.token\s*\}\}", re.IGNORECASE),
+    re.compile(r"authorization\s*[:=]\s*['\"]?(?:bearer|basic)\s+[A-Za-z0-9._+/=-]{12,}", re.IGNORECASE),
+    re.compile(r"(?:EBAY_CLIENT_SECRET|RAKUTEN_ACCESS_KEY|GH_TOKEN)\s*[:=]\s*['\"][^'\"]{8,}['\"]", re.IGNORECASE),
+)
 
 
 def test_all_external_actions_are_pinned_to_full_commit_sha() -> None:
@@ -40,19 +46,15 @@ def test_api_secrets_are_scoped_only_to_the_research_step() -> None:
     assert "persist-credentials: false" in text
 
 
-def test_public_web_assets_do_not_reference_server_side_secret_names() -> None:
-    forbidden = (
-        "EBAY_CLIENT_SECRET",
-        "RAKUTEN_ACCESS_KEY",
-        "GH_TOKEN",
-        "github.token",
-    )
+def test_public_web_assets_do_not_contain_secret_values_or_secret_expressions() -> None:
     for path in (ROOT / "web").rglob("*"):
         if not path.is_file() or path.suffix.lower() not in {".js", ".html", ".json", ".css", ".webmanifest"}:
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
-        for token in forbidden:
-            assert token not in text, f"{token} leaked into public asset {path.relative_to(ROOT)}"
+        for pattern in PUBLIC_SECRET_PATTERNS:
+            assert not pattern.search(text), (
+                f"possible secret value/expression leaked into public asset {path.relative_to(ROOT)}: {pattern.pattern}"
+            )
 
 
 def test_python_dependencies_are_exactly_pinned() -> None:
