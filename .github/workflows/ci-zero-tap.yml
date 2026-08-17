@@ -59,7 +59,9 @@ jobs:
       - name: Python tests
         run: python -m pytest -q
       - name: JavaScript tests
-        run: node tests/web_core.test.cjs
+        run: |
+          node tests/web_core.test.cjs
+          node tests/sw_core.test.cjs
       - name: Syntax checks
         run: |
           python -m py_compile scripts/core.py scripts/research.py scripts/apply_zero_tap_v5.py
