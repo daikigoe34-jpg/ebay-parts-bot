@@ -58,6 +58,7 @@ jobs:
         run: |
           node tests/web_core.test.cjs
           node tests/sw_core.test.cjs
+          node tests/data_freshness.test.cjs
 
       - name: 構文・JSON検証
         run: |
