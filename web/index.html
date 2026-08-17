@@ -19,10 +19,6 @@
       <h1>Part Scout</h1>
       <p id="run-status" class="header-status">データを読み込んでいます…</p>
     </div>
-    <div class="header-actions">
-      <a class="run-button" href="https://github.com/daikigoe34-jpg/ebay-parts-bot/actions/workflows/research.yml" target="_blank" rel="noopener noreferrer">今すぐ更新</a>
-      <button id="refresh-button" class="icon-button" type="button" aria-label="再読み込み">↻</button>
-    </div>
   </header>
 
   <main>
@@ -155,7 +151,7 @@
           <label>最低90日販売下限<input name="minimumSold90d" type="number" min="0" step="1"></label>
           <label>最低市場スコア<input name="minimumMarketScore" type="number" min="0" max="100" step="1"></label>
           <label>最低「販売÷競合」<input name="minimumDemandRatio" type="number" min="0" step="0.01"></label>
-          <button class="primary-button" type="submit">設定を保存</button>
+          <p class="muted">変更内容は自動保存されます。</p>
           <button id="reset-settings-button" class="secondary-button" type="button">推奨値へ戻す</button>
         </article>
       </form>

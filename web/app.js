@@ -149,6 +149,10 @@ const state = {
   sort: "profit",
 };
 
+let lastLoadedAt = 0;
+let loadDataPromise = null;
+let settingsSaveTimer = null;
+
 const els = typeof document !== "undefined" ? {
   runStatus: document.querySelector("#run-status"),
   setupPanel: document.querySelector("#setup-panel"),
@@ -353,6 +357,26 @@ function shouldRefreshData(lastLoadedAt, now = Date.now(), maxAgeMs = DATA_REFRE
   if (!Number.isFinite(loaded) || loaded <= 0) return true;
   if (!Number.isFinite(current) || current < loaded) return true;
   return current - loaded >= Math.max(0, Number(maxAgeMs) || DATA_REFRESH_MAX_AGE_MS);
+}
+
+function selectPayloadProducts(setupStatus, payload) {
+  return shouldUsePayloadProducts(setupStatus, payload) && Array.isArray(payload?.products)
+    ? payload.products
+    : [];
+}
+
+function safeExternalUrl(rawUrl, allowedHosts, fallbackUrl) {
+  try {
+    const url = new URL(String(rawUrl || ""));
+    const hostname = url.hostname.toLowerCase();
+    const allowed = (allowedHosts || []).some((host) => {
+      const normalized = String(host || "").toLowerCase().replace(/^\./, "");
+      return normalized && (hostname === normalized || hostname.endsWith(`.${normalized}`));
+    });
+    return url.protocol === "https:" && allowed ? url.href : fallbackUrl;
+  } catch (_) {
+    return fallbackUrl;
+  }
 }
 
 function payloadExchangeRate() {
@@ -647,7 +671,7 @@ function setupPresentation(status = DEFAULT_SETUP_STATUS) {
       message: status.message || "販売差分、競合、相場、利益を毎日自動更新します。",
       action: "今日やるを見る",
       href: "#tab-today",
-      secondary: "今すぐ更新",
+      secondary: "実行状況を見る",
       secondaryHref: links.workflow,
     },
   };
@@ -678,10 +702,7 @@ function observationProgress(product) {
 }
 
 function mergeProducts() {
-  const rows = state.apiPayload?.demo_data && !state.setupStatus?.ready
-    ? []
-    : (state.apiPayload?.products || []);
-  state.products = rows.map(normalizeProduct);
+  state.products = selectPayloadProducts(state.setupStatus, state.apiPayload).map(normalizeProduct);
 }
 
 function productSortValue(product, mode) {
@@ -877,10 +898,12 @@ function createProductCard(product, rank) {
 
   const rakutenBest = product.rakuten?.items?.[0];
   const rakutenLink = card.querySelector(".rakuten-link");
-  rakutenLink.href = rakutenBest?.url || `https://search.rakuten.co.jp/search/mall/${encodedPart}/`;
+  const rakutenFallback = `https://search.rakuten.co.jp/search/mall/${encodedPart}/`;
+  rakutenLink.href = safeExternalUrl(rakutenBest?.url, ["rakuten.co.jp"], rakutenFallback);
   rakutenLink.textContent = rakutenBest ? `楽天 ${yen(rakutenBest.price_jpy)}` : "楽天を見る";
   card.querySelector(".monotaro-link").href = `https://www.monotaro.com/s/q-${encodedPart}/`;
-  card.querySelector(".ebay-link").href = product.ebay_url || `https://www.ebay.com/sch/i.html?_nkw=${encodedPart}&_sacat=6028`;
+  const ebayFallback = `https://www.ebay.com/sch/i.html?_nkw=${encodedPart}&_sacat=6028`;
+  card.querySelector(".ebay-link").href = safeExternalUrl(product.ebay_url, ["ebay.com"], ebayFallback);
 
   for (const input of card.querySelectorAll("[data-cost]")) {
     const key = input.dataset.cost;
@@ -989,6 +1012,18 @@ function collectSettings() {
   return next;
 }
 
+function persistSettings() {
+  if (!els.settingsForm) return;
+  state.settings = collectSettings();
+  saveJson(STORAGE_KEYS.settings, state.settings);
+  render();
+}
+
+function scheduleSettingsSave() {
+  clearTimeout(settingsSaveTimer);
+  settingsSaveTimer = setTimeout(persistSettings, 180);
+}
+
 function exportCsv() {
   const headers = [
     "品番", "メーカー", "判定", "次にすること", "90日販売下限", "90日推定", "販売精度", "観測日数", "追跡出品数", "観測増分", "競合数", "相場中央値USD",
@@ -1044,25 +1079,36 @@ async function fetchJson(url, fallback) {
 }
 
 async function loadData() {
-  els.runStatus.textContent = "接続状態とeBayデータを読み込んでいます…";
-  const [setup, payload] = await Promise.all([
-    fetchJson("./data/setup_status.json", DEFAULT_SETUP_STATUS),
-    fetchJson("./data/results.json", { products: [], automation: {}, cost_defaults: {}, query: "初回調査前" }),
-  ]);
-  state.setupStatus = { ...clone(DEFAULT_SETUP_STATUS), ...setup, links: { ...DEFAULT_SETUP_STATUS.links, ...(setup.links || {}) } };
-  state.apiPayload = payload;
-  applyPayloadDefaults();
+  if (loadDataPromise) return loadDataPromise;
+  loadDataPromise = (async () => {
+    els.runStatus.textContent = "接続状態とeBayデータを読み込んでいます…";
+    const [setup, payload] = await Promise.all([
+      fetchJson("./data/setup_status.json", DEFAULT_SETUP_STATUS),
+      fetchJson("./data/results.json", { products: [], automation: {}, cost_defaults: {}, query: "初回調査前" }),
+    ]);
+    state.setupStatus = { ...clone(DEFAULT_SETUP_STATUS), ...setup, links: { ...DEFAULT_SETUP_STATUS.links, ...(setup.links || {}) } };
+    state.apiPayload = payload;
+    applyPayloadDefaults();
 
-  const generated = state.apiPayload.generated_at ? new Date(state.apiPayload.generated_at) : null;
-  if (state.setupStatus.ready && generated && !Number.isNaN(generated.getTime())) {
-    els.runStatus.textContent = `更新 ${generated.toLocaleString("ja-JP")} / USDJPY ${effectiveExchangeRate().toFixed(2)}円`;
-  } else {
-    els.runStatus.textContent = setupPresentation(state.setupStatus).badge;
+    const generated = state.apiPayload.generated_at ? new Date(state.apiPayload.generated_at) : null;
+    if (state.setupStatus.ready && generated && !Number.isNaN(generated.getTime())) {
+      els.runStatus.textContent = `更新 ${generated.toLocaleString("ja-JP")} / USDJPY ${effectiveExchangeRate().toFixed(2)}円`;
+    } else {
+      els.runStatus.textContent = setupPresentation(state.setupStatus).badge;
+    }
+    els.qualityNotice.textContent = isDemoPayload(state.apiPayload)
+      ? "デモデータは仕入判定に使用しません。Production API接続後に実データへ切り替わります。"
+      : (state.apiPayload.method_note || "Production Browse APIの日次差分だけで販売ペースを学習します。");
+    els.qualityNotice.classList.add("is-visible");
+    populateSettingsForm();
+    render();
+    lastLoadedAt = Date.now();
+  })();
+  try {
+    return await loadDataPromise;
+  } finally {
+    loadDataPromise = null;
   }
-  els.qualityNotice.textContent = state.apiPayload.method_note || "Production Browse APIの日次差分だけで販売ペースを学習します。";
-  els.qualityNotice.classList.add("is-visible");
-  populateSettingsForm();
-  render();
 }
 
 function activateTab(name) {
@@ -1077,15 +1123,14 @@ function bindEvents() {
       window.scrollTo({ top: document.querySelector(".tabs").offsetTop - 8, behavior: "smooth" });
     });
   });
-  document.querySelector("#refresh-button")?.addEventListener("click", loadData);
   els.filterInput?.addEventListener("input", () => { state.filter = els.filterInput.value; render(); });
   els.sortSelect?.addEventListener("change", () => { state.sort = els.sortSelect.value; render(); });
+  els.settingsForm?.addEventListener("input", scheduleSettingsSave);
+  els.settingsForm?.addEventListener("change", scheduleSettingsSave);
   els.settingsForm?.addEventListener("submit", (event) => {
     event.preventDefault();
-    state.settings = collectSettings();
-    saveJson(STORAGE_KEYS.settings, state.settings);
-    render();
-    activateTab("today");
+    clearTimeout(settingsSaveTimer);
+    persistSettings();
   });
   document.querySelector("#reset-settings-button")?.addEventListener("click", () => {
     state.settings = clone(DEFAULT_SETTINGS);
@@ -1107,6 +1152,12 @@ if (typeof document !== "undefined") {
   populateSettingsForm();
   bindEvents();
   loadData();
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && shouldRefreshData(lastLoadedAt)) loadData();
+  });
+  window.addEventListener("pageshow", () => {
+    if (shouldRefreshData(lastLoadedAt)) loadData();
+  });
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => navigator.serviceWorker.register("./sw.js").catch(console.error));
   }
@@ -1138,5 +1189,7 @@ if (typeof module !== "undefined" && module.exports) {
     isDemoPayload,
     shouldUsePayloadProducts,
     shouldRefreshData,
+    selectPayloadProducts,
+    safeExternalUrl,
   };
 }
