@@ -25,6 +25,8 @@ const {
   isDemoPayload,
   shouldUsePayloadProducts,
   shouldRefreshData,
+  selectPayloadProducts,
+  safeExternalUrl,
 } = app;
 
 function resetState() {
@@ -170,10 +172,21 @@ assert.equal(isDemoPayload(realPayload), false);
 assert.equal(shouldUsePayloadProducts({ ready: false }, demoPayload), false);
 assert.equal(shouldUsePayloadProducts({ ready: true }, demoPayload), false);
 assert.equal(shouldUsePayloadProducts({ ready: true }, realPayload), true);
+assert.deepEqual(selectPayloadProducts({ ready: false }, demoPayload), []);
+assert.deepEqual(selectPayloadProducts({ ready: true }, demoPayload), []);
+assert.equal(selectPayloadProducts({ ready: true }, realPayload).length, 1);
 
 const now = Date.parse("2026-08-18T00:00:00Z");
 assert.equal(shouldRefreshData(0, now), true);
 assert.equal(shouldRefreshData(now - 60_000, now), false);
 assert.equal(shouldRefreshData(now - 10 * 60_000, now), true);
+
+const ebayFallback = "https://www.ebay.com/sch/i.html?_nkw=25550-5SA0A";
+assert.equal(safeExternalUrl("javascript:alert(1)", ["ebay.com"], ebayFallback), ebayFallback);
+assert.equal(safeExternalUrl("http://www.ebay.com/itm/123", ["ebay.com"], ebayFallback), ebayFallback);
+assert.equal(safeExternalUrl("https://evil.example/itm/123", ["ebay.com"], ebayFallback), ebayFallback);
+assert.equal(safeExternalUrl("https://www.ebay.com/itm/123", ["ebay.com"], ebayFallback), "https://www.ebay.com/itm/123");
+const rakutenUrl = "https://item.rakuten.co.jp/example/25550-5sa0a/";
+assert.equal(safeExternalUrl(rakutenUrl, ["rakuten.co.jp"], ebayFallback), rakutenUrl);
 
 console.log("web core tests passed");
