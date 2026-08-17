@@ -1,15 +1,19 @@
 "use strict";
 
-const CACHE_NAME = "part-scout-shell-v7";
-const DATA_URLS = ["./data/results.json", "./data/setup_status.json"];
+importScripts("./sw_core.js");
+
+const CACHE_NAME = "part-scout-shell-v8";
 const SHELL = [
   "./",
   "./index.html",
   "./styles.css",
   "./app.js",
+  "./sw_core.js",
   "./manifest.webmanifest",
   "./icons/icon-512.png",
 ];
+
+const { stableCacheUrl, isDynamicDataUrl } = self.PartScoutSWCore;
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL)));
@@ -26,20 +30,19 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
-  const url = new URL(event.request.url);
-  const isData = DATA_URLS.some((path) => url.pathname.endsWith(path.replace(".", "")));
 
-  if (isData) {
+  if (isDynamicDataUrl(event.request.url)) {
+    const stableUrl = stableCacheUrl(event.request.url);
     event.respondWith(
       fetch(event.request, { cache: "no-store" })
         .then(async (response) => {
           if (response.ok) {
             const cache = await caches.open(CACHE_NAME);
-            await cache.put(event.request, response.clone());
+            await cache.put(stableUrl, response.clone());
           }
           return response;
         })
-        .catch(() => caches.match(event.request))
+        .catch(() => caches.match(stableUrl))
     );
     return;
   }

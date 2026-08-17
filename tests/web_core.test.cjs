@@ -22,6 +22,12 @@ const {
   normalizeProduct,
   setupPresentation,
   observationProgress,
+  isDemoPayload,
+  shouldUsePayloadProducts,
+  shouldRefreshData,
+  selectPayloadProducts,
+  safeExternalUrl,
+  applyCostValuesToControls,
 } = app;
 
 function resetState() {
@@ -153,5 +159,54 @@ assert.equal(setupReady.tone, "good");
 resetState();
 const noSetupAction = nextAction(verified, calculateProfit(verified), { status: "missing_secrets", ready: false, links: {} });
 assert.equal(noSetupAction, "APIキーを登録");
+
+const demoPayload = {
+  automation: { production_api: { status: "demo_not_connected" } },
+  products: [{ title: "DEMO: Nissan switch", source: "demo_production_browse_daily_delta" }],
+};
+const realPayload = {
+  automation: { production_api: { status: "ready" } },
+  products: [{ title: "Nissan switch", source: "ebay_production_browse_daily_delta" }],
+};
+assert.equal(isDemoPayload(demoPayload), true);
+assert.equal(isDemoPayload(realPayload), false);
+assert.equal(shouldUsePayloadProducts({ ready: false }, demoPayload), false);
+assert.equal(shouldUsePayloadProducts({ ready: true }, demoPayload), false);
+assert.equal(shouldUsePayloadProducts({ ready: true }, realPayload), true);
+assert.deepEqual(selectPayloadProducts({ ready: false }, demoPayload), []);
+assert.deepEqual(selectPayloadProducts({ ready: true }, demoPayload), []);
+assert.equal(selectPayloadProducts({ ready: true }, realPayload).length, 1);
+
+const now = Date.parse("2026-08-18T00:00:00Z");
+assert.equal(shouldRefreshData(0, now), true);
+assert.equal(shouldRefreshData(now - 60_000, now), false);
+assert.equal(shouldRefreshData(now - 10 * 60_000, now), true);
+
+const ebayFallback = "https://www.ebay.com/sch/i.html?_nkw=25550-5SA0A";
+assert.equal(safeExternalUrl("javascript:alert(1)", ["ebay.com"], ebayFallback), ebayFallback);
+assert.equal(safeExternalUrl("http://www.ebay.com/itm/123", ["ebay.com"], ebayFallback), ebayFallback);
+assert.equal(safeExternalUrl("https://evil.example/itm/123", ["ebay.com"], ebayFallback), ebayFallback);
+assert.equal(safeExternalUrl("https://www.ebay.com/itm/123", ["ebay.com"], ebayFallback), "https://www.ebay.com/itm/123");
+const rakutenUrl = "https://item.rakuten.co.jp/example/25550-5sa0a/";
+assert.equal(safeExternalUrl(rakutenUrl, ["rakuten.co.jp"], ebayFallback), rakutenUrl);
+
+const numberControl = { type: "number", tagName: "INPUT", dataset: { cost: "procurementJpy" }, value: "" };
+const checkboxControl = { type: "checkbox", tagName: "INPUT", dataset: { cost: "supplierConfirmed" }, checked: false };
+const selectControl = {
+  type: "select-one",
+  tagName: "SELECT",
+  dataset: { cost: "originCode" },
+  value: "",
+  options: [{ value: "" }, { value: "JP" }, { value: "OTHER" }],
+};
+applyCostValuesToControls(
+  [numberControl, checkboxControl, selectControl],
+  { procurementJpy: 4200, supplierConfirmed: true, originCode: "JP" },
+);
+assert.equal(numberControl.value, 4200);
+assert.equal(checkboxControl.checked, true);
+assert.equal(selectControl.value, "JP");
+applyCostValuesToControls([selectControl], { originCode: "XX" });
+assert.equal(selectControl.value, "OTHER");
 
 console.log("web core tests passed");

@@ -86,6 +86,8 @@ const DEFAULT_SETUP_STATUS = {
   details: {},
 };
 
+const DATA_REFRESH_MAX_AGE_MS = 5 * 60 * 1000;
+
 function clone(value) {
   return typeof structuredClone === "function"
     ? structuredClone(value)
@@ -146,6 +148,10 @@ const state = {
   filter: "",
   sort: "profit",
 };
+
+let lastLoadedAt = 0;
+let loadDataPromise = null;
+let settingsSaveTimer = null;
 
 const els = typeof document !== "undefined" ? {
   runStatus: document.querySelector("#run-status"),
@@ -327,6 +333,63 @@ function feeProfile(settings = state.settings, product = {}) {
 
 function isSalesAutoVerified(product) {
   return product.sales_auto_verified === true && product.sales_confidence === "high";
+}
+
+function isDemoPayload(payload = {}) {
+  if (!payload || typeof payload !== "object") return false;
+  if (payload.demo_data === true) return true;
+  const productionStatus = String(payload.automation?.production_api?.status || "").toLowerCase();
+  if (productionStatus.startsWith("demo")) return true;
+  return (payload.products || []).some((product) => {
+    const title = String(product?.title || "").toUpperCase();
+    const source = String(product?.source || "").toLowerCase();
+    return title.startsWith("DEMO:") || source.startsWith("demo_") || source.includes("demo_production");
+  });
+}
+
+function shouldUsePayloadProducts(setupStatus, payload) {
+  return setupStatus?.ready === true && !isDemoPayload(payload);
+}
+
+function shouldRefreshData(lastLoadedAt, now = Date.now(), maxAgeMs = DATA_REFRESH_MAX_AGE_MS) {
+  const loaded = Number(lastLoadedAt);
+  const current = Number(now);
+  if (!Number.isFinite(loaded) || loaded <= 0) return true;
+  if (!Number.isFinite(current) || current < loaded) return true;
+  return current - loaded >= Math.max(0, Number(maxAgeMs) || DATA_REFRESH_MAX_AGE_MS);
+}
+
+function selectPayloadProducts(setupStatus, payload) {
+  return shouldUsePayloadProducts(setupStatus, payload) && Array.isArray(payload?.products)
+    ? payload.products
+    : [];
+}
+
+function isPayloadFresh(payload, now = Date.now(), maxAgeMs = 48 * 60 * 60 * 1000) {
+  const generatedAt = Date.parse(String(payload?.generated_at || ""));
+  const current = Number(now);
+  if (!Number.isFinite(generatedAt) || !Number.isFinite(current)) return false;
+  const age = current - generatedAt;
+  const allowedFutureSkew = 5 * 60 * 1000;
+  return age >= -allowedFutureSkew && age <= Math.max(0, Number(maxAgeMs) || 0);
+}
+
+function selectRenderableProducts(setupStatus, payload, now = Date.now()) {
+  return isPayloadFresh(payload, now) ? selectPayloadProducts(setupStatus, payload) : [];
+}
+
+function safeExternalUrl(rawUrl, allowedHosts, fallbackUrl) {
+  try {
+    const url = new URL(String(rawUrl || ""));
+    const hostname = url.hostname.toLowerCase();
+    const allowed = (allowedHosts || []).some((host) => {
+      const normalized = String(host || "").toLowerCase().replace(/^\./, "");
+      return normalized && (hostname === normalized || hostname.endsWith(`.${normalized}`));
+    });
+    return url.protocol === "https:" && allowed ? url.href : fallbackUrl;
+  } catch (_) {
+    return fallbackUrl;
+  }
 }
 
 function payloadExchangeRate() {
@@ -621,7 +684,7 @@ function setupPresentation(status = DEFAULT_SETUP_STATUS) {
       message: status.message || "販売差分、競合、相場、利益を毎日自動更新します。",
       action: "今日やるを見る",
       href: "#tab-today",
-      secondary: "今すぐ更新",
+      secondary: "実行状況を見る",
       secondaryHref: links.workflow,
     },
   };
@@ -652,10 +715,7 @@ function observationProgress(product) {
 }
 
 function mergeProducts() {
-  const rows = state.apiPayload?.demo_data && !state.setupStatus?.ready
-    ? []
-    : (state.apiPayload?.products || []);
-  state.products = rows.map(normalizeProduct);
+  state.products = selectRenderableProducts(state.setupStatus, state.apiPayload).map(normalizeProduct);
 }
 
 function productSortValue(product, mode) {
@@ -851,18 +911,16 @@ function createProductCard(product, rank) {
 
   const rakutenBest = product.rakuten?.items?.[0];
   const rakutenLink = card.querySelector(".rakuten-link");
-  rakutenLink.href = rakutenBest?.url || `https://search.rakuten.co.jp/search/mall/${encodedPart}/`;
+  const rakutenFallback = `https://search.rakuten.co.jp/search/mall/${encodedPart}/`;
+  rakutenLink.href = safeExternalUrl(rakutenBest?.url, ["rakuten.co.jp"], rakutenFallback);
   rakutenLink.textContent = rakutenBest ? `楽天 ${yen(rakutenBest.price_jpy)}` : "楽天を見る";
   card.querySelector(".monotaro-link").href = `https://www.monotaro.com/s/q-${encodedPart}/`;
-  card.querySelector(".ebay-link").href = product.ebay_url || `https://www.ebay.com/sch/i.html?_nkw=${encodedPart}&_sacat=6028`;
+  const ebayFallback = `https://www.ebay.com/sch/i.html?_nkw=${encodedPart}&_sacat=6028`;
+  card.querySelector(".ebay-link").href = safeExternalUrl(product.ebay_url, ["ebay.com"], ebayFallback);
 
   for (const input of card.querySelectorAll("[data-cost]")) {
     const key = input.dataset.cost;
-    if (input.type === "checkbox") input.checked = values[key] === true;
-    else if (input.tagName === "SELECT") {
-      const selectValue = String(values[key] ?? "");
-      input.value = Array.from(input.options).some((option) => option.value === selectValue) ? selectValue : (selectValue ? "OTHER" : "");
-    } else input.value = number(values[key], 0) || "";
+    applyCostValuesToControls([input], values);
 
     input.addEventListener(input.type === "number" ? "input" : "change", () => {
       state.costs[product.part_number] ||= {};
@@ -882,10 +940,32 @@ function createProductCard(product, rank) {
   return fragment;
 }
 
+function applyCostValuesToControls(controls, values) {
+  for (const control of controls || []) {
+    const key = control?.dataset?.cost;
+    if (!key) continue;
+    if (control.type === "checkbox") {
+      control.checked = values?.[key] === true;
+    } else if (control.tagName === "SELECT") {
+      const selectValue = String(values?.[key] ?? "");
+      const options = Array.from(control.options || []);
+      control.value = options.some((option) => option.value === selectValue)
+        ? selectValue
+        : (selectValue ? "OTHER" : "");
+    } else {
+      control.value = number(values?.[key], 0) || "";
+    }
+  }
+}
+
 function updateAllCardsForProduct(partNumber) {
   const product = state.products.find((row) => row.part_number === partNumber);
   if (!product || typeof document === "undefined") return;
-  document.querySelectorAll(`.product-card[data-part-number="${CSS.escape(partNumber)}"]`).forEach((card) => updateProfitArea(card, product));
+  const values = getCostValues(product);
+  document.querySelectorAll(`.product-card[data-part-number="${CSS.escape(partNumber)}"]`).forEach((card) => {
+    applyCostValuesToControls(card.querySelectorAll("[data-cost]"), values);
+    updateProfitArea(card, product);
+  });
   const sorted = [...state.products].sort((a, b) => productSortValue(b, "profit") - productSortValue(a, "profit"));
   updateGlobalNextTask(sorted);
 }
@@ -963,6 +1043,18 @@ function collectSettings() {
   return next;
 }
 
+function persistSettings() {
+  if (!els.settingsForm) return;
+  state.settings = collectSettings();
+  saveJson(STORAGE_KEYS.settings, state.settings);
+  render();
+}
+
+function scheduleSettingsSave() {
+  clearTimeout(settingsSaveTimer);
+  settingsSaveTimer = setTimeout(persistSettings, 180);
+}
+
 function exportCsv() {
   const headers = [
     "品番", "メーカー", "判定", "次にすること", "90日販売下限", "90日推定", "販売精度", "観測日数", "追跡出品数", "観測増分", "競合数", "相場中央値USD",
@@ -1018,25 +1110,38 @@ async function fetchJson(url, fallback) {
 }
 
 async function loadData() {
-  els.runStatus.textContent = "接続状態とeBayデータを読み込んでいます…";
-  const [setup, payload] = await Promise.all([
-    fetchJson("./data/setup_status.json", DEFAULT_SETUP_STATUS),
-    fetchJson("./data/results.json", { products: [], automation: {}, cost_defaults: {}, query: "初回調査前" }),
-  ]);
-  state.setupStatus = { ...clone(DEFAULT_SETUP_STATUS), ...setup, links: { ...DEFAULT_SETUP_STATUS.links, ...(setup.links || {}) } };
-  state.apiPayload = payload;
-  applyPayloadDefaults();
+  if (loadDataPromise) return loadDataPromise;
+  loadDataPromise = (async () => {
+    els.runStatus.textContent = "接続状態とeBayデータを読み込んでいます…";
+    const [setup, payload] = await Promise.all([
+      fetchJson("./data/setup_status.json", DEFAULT_SETUP_STATUS),
+      fetchJson("./data/results.json", { products: [], automation: {}, cost_defaults: {}, query: "初回調査前" }),
+    ]);
+    state.setupStatus = { ...clone(DEFAULT_SETUP_STATUS), ...setup, links: { ...DEFAULT_SETUP_STATUS.links, ...(setup.links || {}) } };
+    state.apiPayload = payload;
+    applyPayloadDefaults();
 
-  const generated = state.apiPayload.generated_at ? new Date(state.apiPayload.generated_at) : null;
-  if (state.setupStatus.ready && generated && !Number.isNaN(generated.getTime())) {
-    els.runStatus.textContent = `更新 ${generated.toLocaleString("ja-JP")} / USDJPY ${effectiveExchangeRate().toFixed(2)}円`;
-  } else {
-    els.runStatus.textContent = setupPresentation(state.setupStatus).badge;
+    const generated = state.apiPayload.generated_at ? new Date(state.apiPayload.generated_at) : null;
+    if (state.setupStatus.ready && generated && !Number.isNaN(generated.getTime())) {
+      els.runStatus.textContent = `更新 ${generated.toLocaleString("ja-JP")} / USDJPY ${effectiveExchangeRate().toFixed(2)}円`;
+    } else {
+      els.runStatus.textContent = setupPresentation(state.setupStatus).badge;
+    }
+    els.qualityNotice.textContent = isDemoPayload(state.apiPayload)
+      ? "デモデータは仕入判定に使用しません。Production API接続後に実データへ切り替わります。"
+      : !isPayloadFresh(state.apiPayload)
+        ? "調査結果が48時間以上古いため、仕入候補の表示を安全停止しています。次回の自動更新を確認してください。"
+        : (state.apiPayload.method_note || "Production Browse APIの日次差分だけで販売ペースを学習します。");
+    els.qualityNotice.classList.add("is-visible");
+    populateSettingsForm();
+    render();
+    lastLoadedAt = Date.now();
+  })();
+  try {
+    return await loadDataPromise;
+  } finally {
+    loadDataPromise = null;
   }
-  els.qualityNotice.textContent = state.apiPayload.method_note || "Production Browse APIの日次差分だけで販売ペースを学習します。";
-  els.qualityNotice.classList.add("is-visible");
-  populateSettingsForm();
-  render();
 }
 
 function activateTab(name) {
@@ -1051,15 +1156,14 @@ function bindEvents() {
       window.scrollTo({ top: document.querySelector(".tabs").offsetTop - 8, behavior: "smooth" });
     });
   });
-  document.querySelector("#refresh-button")?.addEventListener("click", loadData);
   els.filterInput?.addEventListener("input", () => { state.filter = els.filterInput.value; render(); });
   els.sortSelect?.addEventListener("change", () => { state.sort = els.sortSelect.value; render(); });
+  els.settingsForm?.addEventListener("input", scheduleSettingsSave);
+  els.settingsForm?.addEventListener("change", scheduleSettingsSave);
   els.settingsForm?.addEventListener("submit", (event) => {
     event.preventDefault();
-    state.settings = collectSettings();
-    saveJson(STORAGE_KEYS.settings, state.settings);
-    render();
-    activateTab("today");
+    clearTimeout(settingsSaveTimer);
+    persistSettings();
   });
   document.querySelector("#reset-settings-button")?.addEventListener("click", () => {
     state.settings = clone(DEFAULT_SETTINGS);
@@ -1081,6 +1185,12 @@ if (typeof document !== "undefined") {
   populateSettingsForm();
   bindEvents();
   loadData();
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && shouldRefreshData(lastLoadedAt)) loadData();
+  });
+  window.addEventListener("pageshow", () => {
+    if (shouldRefreshData(lastLoadedAt)) loadData();
+  });
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => navigator.serviceWorker.register("./sw.js").catch(console.error));
   }
@@ -1109,5 +1219,13 @@ if (typeof module !== "undefined" && module.exports) {
     normalizeProduct,
     setupPresentation,
     observationProgress,
+    isDemoPayload,
+    shouldUsePayloadProducts,
+    shouldRefreshData,
+    selectPayloadProducts,
+    safeExternalUrl,
+    isPayloadFresh,
+    selectRenderableProducts,
+    applyCostValuesToControls,
   };
 }
