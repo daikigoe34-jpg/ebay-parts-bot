@@ -4,13 +4,23 @@ on:
   push:
     branches:
       - agent/zero-tap-security-hardening-v0.5
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "web/**"
+      - "scripts/**"
+      - "tests/**"
+      - "config/**"
+      - "requirements.txt"
+      - ".github/workflows/**"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: zero-tap-ci-${{ github.ref }}
+  group: zero-tap-ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
