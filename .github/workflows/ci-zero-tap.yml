@@ -17,7 +17,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: zero-tap-ci-${{ github.workflow }}-${{ github.ref }}
@@ -28,9 +28,29 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref_name }}
+          fetch-depth: 0
+      - name: Apply one-shot zero-tap patch
+        if: github.event_name == 'push'
+        run: python scripts/apply_zero_tap_v5.py
+      - name: Commit one-shot patch
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add web/app.js web/index.html
+          if git diff --cached --quiet; then
+            echo "No patch changes to commit."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -m "feat: zero-tap UI and trusted external links"
+            git push origin HEAD:agent/zero-tap-security-hardening-v0.5
+          fi
       - name: Setup Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: "3.13"
           cache: pip
@@ -42,7 +62,7 @@ jobs:
         run: node tests/web_core.test.cjs
       - name: Syntax checks
         run: |
-          python -m py_compile scripts/core.py scripts/research.py
+          python -m py_compile scripts/core.py scripts/research.py scripts/apply_zero_tap_v5.py
           node --check web/app.js
           node --check web/sw.js
           python -m json.tool web/manifest.webmanifest >/dev/null
