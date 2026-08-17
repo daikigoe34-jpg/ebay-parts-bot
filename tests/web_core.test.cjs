@@ -27,6 +27,7 @@ const {
   shouldRefreshData,
   selectPayloadProducts,
   safeExternalUrl,
+  applyCostValuesToControls,
 } = app;
 
 function resetState() {
@@ -188,5 +189,24 @@ assert.equal(safeExternalUrl("https://evil.example/itm/123", ["ebay.com"], ebayF
 assert.equal(safeExternalUrl("https://www.ebay.com/itm/123", ["ebay.com"], ebayFallback), "https://www.ebay.com/itm/123");
 const rakutenUrl = "https://item.rakuten.co.jp/example/25550-5sa0a/";
 assert.equal(safeExternalUrl(rakutenUrl, ["rakuten.co.jp"], ebayFallback), rakutenUrl);
+
+const numberControl = { type: "number", tagName: "INPUT", dataset: { cost: "procurementJpy" }, value: "" };
+const checkboxControl = { type: "checkbox", tagName: "INPUT", dataset: { cost: "supplierConfirmed" }, checked: false };
+const selectControl = {
+  type: "select-one",
+  tagName: "SELECT",
+  dataset: { cost: "originCode" },
+  value: "",
+  options: [{ value: "" }, { value: "JP" }, { value: "OTHER" }],
+};
+applyCostValuesToControls(
+  [numberControl, checkboxControl, selectControl],
+  { procurementJpy: 4200, supplierConfirmed: true, originCode: "JP" },
+);
+assert.equal(numberControl.value, 4200);
+assert.equal(checkboxControl.checked, true);
+assert.equal(selectControl.value, "JP");
+applyCostValuesToControls([selectControl], { originCode: "XX" });
+assert.equal(selectControl.value, "OTHER");
 
 console.log("web core tests passed");
