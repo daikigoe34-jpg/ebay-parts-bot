@@ -30,6 +30,8 @@ GitHub Pagesへ配信するHTML・JavaScriptにはeBay Secretを含めません�
 
 `web/data/results.json`に同梱されるデモデータはProduction接続状態に関係なく仕入判定へ使いません。Production APIが接続済みで、かつ実データと判定できる場合だけ商品候補を表示します。
 
+実データでも`generated_at`から48時間を超えた結果、時刻が不正な結果、生成時刻が大きく未来へずれた結果は**fail closed**として仕入候補を表示しません。データ鮮度が復旧するまで画面上で安全停止を明示します。
+
 ## PWAキャッシュ
 
 `results.json`と`setup_status.json`はnetwork-firstで取得します。キャッシュバスターのクエリ文字列はキャッシュキーから除去し、同じデータファイルが無制限にキャッシュ増殖しないようにします。オフライン時だけ直近の安定キーをフォールバックとして使います。
