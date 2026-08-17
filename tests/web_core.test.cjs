@@ -22,6 +22,9 @@ const {
   normalizeProduct,
   setupPresentation,
   observationProgress,
+  isDemoPayload,
+  shouldUsePayloadProducts,
+  shouldRefreshData,
 } = app;
 
 function resetState() {
@@ -153,5 +156,24 @@ assert.equal(setupReady.tone, "good");
 resetState();
 const noSetupAction = nextAction(verified, calculateProfit(verified), { status: "missing_secrets", ready: false, links: {} });
 assert.equal(noSetupAction, "APIキーを登録");
+
+const demoPayload = {
+  automation: { production_api: { status: "demo_not_connected" } },
+  products: [{ title: "DEMO: Nissan switch", source: "demo_production_browse_daily_delta" }],
+};
+const realPayload = {
+  automation: { production_api: { status: "ready" } },
+  products: [{ title: "Nissan switch", source: "ebay_production_browse_daily_delta" }],
+};
+assert.equal(isDemoPayload(demoPayload), true);
+assert.equal(isDemoPayload(realPayload), false);
+assert.equal(shouldUsePayloadProducts({ ready: false }, demoPayload), false);
+assert.equal(shouldUsePayloadProducts({ ready: true }, demoPayload), false);
+assert.equal(shouldUsePayloadProducts({ ready: true }, realPayload), true);
+
+const now = Date.parse("2026-08-18T00:00:00Z");
+assert.equal(shouldRefreshData(0, now), true);
+assert.equal(shouldRefreshData(now - 60_000, now), false);
+assert.equal(shouldRefreshData(now - 10 * 60_000, now), true);
 
 console.log("web core tests passed");
