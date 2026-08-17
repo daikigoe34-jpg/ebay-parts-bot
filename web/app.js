@@ -365,6 +365,19 @@ function selectPayloadProducts(setupStatus, payload) {
     : [];
 }
 
+function isPayloadFresh(payload, now = Date.now(), maxAgeMs = 48 * 60 * 60 * 1000) {
+  const generatedAt = Date.parse(String(payload?.generated_at || ""));
+  const current = Number(now);
+  if (!Number.isFinite(generatedAt) || !Number.isFinite(current)) return false;
+  const age = current - generatedAt;
+  const allowedFutureSkew = 5 * 60 * 1000;
+  return age >= -allowedFutureSkew && age <= Math.max(0, Number(maxAgeMs) || 0);
+}
+
+function selectRenderableProducts(setupStatus, payload, now = Date.now()) {
+  return isPayloadFresh(payload, now) ? selectPayloadProducts(setupStatus, payload) : [];
+}
+
 function safeExternalUrl(rawUrl, allowedHosts, fallbackUrl) {
   try {
     const url = new URL(String(rawUrl || ""));
@@ -702,7 +715,7 @@ function observationProgress(product) {
 }
 
 function mergeProducts() {
-  state.products = selectPayloadProducts(state.setupStatus, state.apiPayload).map(normalizeProduct);
+  state.products = selectRenderableProducts(state.setupStatus, state.apiPayload).map(normalizeProduct);
 }
 
 function productSortValue(product, mode) {
@@ -1116,7 +1129,9 @@ async function loadData() {
     }
     els.qualityNotice.textContent = isDemoPayload(state.apiPayload)
       ? "デモデータは仕入判定に使用しません。Production API接続後に実データへ切り替わります。"
-      : (state.apiPayload.method_note || "Production Browse APIの日次差分だけで販売ペースを学習します。");
+      : !isPayloadFresh(state.apiPayload)
+        ? "調査結果が48時間以上古いため、仕入候補の表示を安全停止しています。次回の自動更新を確認してください。"
+        : (state.apiPayload.method_note || "Production Browse APIの日次差分だけで販売ペースを学習します。");
     els.qualityNotice.classList.add("is-visible");
     populateSettingsForm();
     render();
@@ -1209,6 +1224,8 @@ if (typeof module !== "undefined" && module.exports) {
     shouldRefreshData,
     selectPayloadProducts,
     safeExternalUrl,
+    isPayloadFresh,
+    selectRenderableProducts,
     applyCostValuesToControls,
   };
 }
