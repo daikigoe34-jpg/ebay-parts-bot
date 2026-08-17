@@ -86,6 +86,8 @@ const DEFAULT_SETUP_STATUS = {
   details: {},
 };
 
+const DATA_REFRESH_MAX_AGE_MS = 5 * 60 * 1000;
+
 function clone(value) {
   return typeof structuredClone === "function"
     ? structuredClone(value)
@@ -327,6 +329,30 @@ function feeProfile(settings = state.settings, product = {}) {
 
 function isSalesAutoVerified(product) {
   return product.sales_auto_verified === true && product.sales_confidence === "high";
+}
+
+function isDemoPayload(payload = {}) {
+  if (!payload || typeof payload !== "object") return false;
+  if (payload.demo_data === true) return true;
+  const productionStatus = String(payload.automation?.production_api?.status || "").toLowerCase();
+  if (productionStatus.startsWith("demo")) return true;
+  return (payload.products || []).some((product) => {
+    const title = String(product?.title || "").toUpperCase();
+    const source = String(product?.source || "").toLowerCase();
+    return title.startsWith("DEMO:") || source.startsWith("demo_") || source.includes("demo_production");
+  });
+}
+
+function shouldUsePayloadProducts(setupStatus, payload) {
+  return setupStatus?.ready === true && !isDemoPayload(payload);
+}
+
+function shouldRefreshData(lastLoadedAt, now = Date.now(), maxAgeMs = DATA_REFRESH_MAX_AGE_MS) {
+  const loaded = Number(lastLoadedAt);
+  const current = Number(now);
+  if (!Number.isFinite(loaded) || loaded <= 0) return true;
+  if (!Number.isFinite(current) || current < loaded) return true;
+  return current - loaded >= Math.max(0, Number(maxAgeMs) || DATA_REFRESH_MAX_AGE_MS);
 }
 
 function payloadExchangeRate() {
@@ -1109,5 +1135,8 @@ if (typeof module !== "undefined" && module.exports) {
     normalizeProduct,
     setupPresentation,
     observationProgress,
+    isDemoPayload,
+    shouldUsePayloadProducts,
+    shouldRefreshData,
   };
 }
