@@ -907,11 +907,7 @@ function createProductCard(product, rank) {
 
   for (const input of card.querySelectorAll("[data-cost]")) {
     const key = input.dataset.cost;
-    if (input.type === "checkbox") input.checked = values[key] === true;
-    else if (input.tagName === "SELECT") {
-      const selectValue = String(values[key] ?? "");
-      input.value = Array.from(input.options).some((option) => option.value === selectValue) ? selectValue : (selectValue ? "OTHER" : "");
-    } else input.value = number(values[key], 0) || "";
+    applyCostValuesToControls([input], values);
 
     input.addEventListener(input.type === "number" ? "input" : "change", () => {
       state.costs[product.part_number] ||= {};
@@ -931,10 +927,32 @@ function createProductCard(product, rank) {
   return fragment;
 }
 
+function applyCostValuesToControls(controls, values) {
+  for (const control of controls || []) {
+    const key = control?.dataset?.cost;
+    if (!key) continue;
+    if (control.type === "checkbox") {
+      control.checked = values?.[key] === true;
+    } else if (control.tagName === "SELECT") {
+      const selectValue = String(values?.[key] ?? "");
+      const options = Array.from(control.options || []);
+      control.value = options.some((option) => option.value === selectValue)
+        ? selectValue
+        : (selectValue ? "OTHER" : "");
+    } else {
+      control.value = number(values?.[key], 0) || "";
+    }
+  }
+}
+
 function updateAllCardsForProduct(partNumber) {
   const product = state.products.find((row) => row.part_number === partNumber);
   if (!product || typeof document === "undefined") return;
-  document.querySelectorAll(`.product-card[data-part-number="${CSS.escape(partNumber)}"]`).forEach((card) => updateProfitArea(card, product));
+  const values = getCostValues(product);
+  document.querySelectorAll(`.product-card[data-part-number="${CSS.escape(partNumber)}"]`).forEach((card) => {
+    applyCostValuesToControls(card.querySelectorAll("[data-cost]"), values);
+    updateProfitArea(card, product);
+  });
   const sorted = [...state.products].sort((a, b) => productSortValue(b, "profit") - productSortValue(a, "profit"));
   updateGlobalNextTask(sorted);
 }
@@ -1191,5 +1209,6 @@ if (typeof module !== "undefined" && module.exports) {
     shouldRefreshData,
     selectPayloadProducts,
     safeExternalUrl,
+    applyCostValuesToControls,
   };
 }
