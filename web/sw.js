@@ -1,10 +1,10 @@
 "use strict";
 importScripts("./sw_core.js");
 
-const CACHE_NAME = "part-scout-shell-v9";
+const CACHE_NAME = "part-scout-shell-v10";
 const DATA_CACHE = "part-scout-data-v1";
 const DATA_PATHS = ["data/results.json", "data/setup_status.json"];
-const SHELL = ["./", "./index.html", "./styles.css", "./persistence.js", "./app.js", "./sw_core.js", "./manifest.webmanifest", "./icons/icon-512.png"];
+const SHELL = ["./", "./index.html", "./styles.css", "./persistence.js", "./shipping.js", "./app.js", "./sw_core.js", "./manifest.webmanifest", "./icons/icon-512.png"];
 const { stableCacheUrl, isDynamicDataUrl } = self.PartScoutSWCore;
 
 self.addEventListener("install", event => {

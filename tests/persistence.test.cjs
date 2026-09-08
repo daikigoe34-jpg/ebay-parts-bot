@@ -37,7 +37,8 @@ test("settings are durable before the render debounce fires, and backup import v
   const storage = memoryStorage();
   const context = vm.createContext({ module: { exports: {} }, require, localStorage: storage,
     structuredClone, console, URL, Date, setTimeout: () => 1, clearTimeout: () => {},
-    PartScoutPersistence: require("../web/persistence.js") });
+    PartScoutPersistence: require("../web/persistence.js"),
+    PartScoutShipping: require("../web/shipping.js") });
   vm.runInContext(fs.readFileSync(require.resolve("../web/app.js"), "utf8"), context);
   vm.runInContext(`
     els.settingsForm = { elements: { namedItem(key) {

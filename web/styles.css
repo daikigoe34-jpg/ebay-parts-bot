@@ -205,6 +205,17 @@ main { width: min(100%, 920px); margin: 0 auto; padding: 13px; }
 .profit-details summary { cursor: pointer; color: var(--accent); font-size: .78rem; font-weight: 800; }
 .profit-form { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
 .profit-form label, .settings-grid label { display: grid; gap: 5px; color: #475569; font-size: .69rem; }
+.shipping-method-field, .shipping-region-field, .shipping-reference { grid-column: 1 / -1; }
+.shipping-method-field {
+  border: 1px solid #93c5fd; border-radius: 12px; padding: 10px; background: #eff6ff;
+  color: #1e3a8a !important; font-weight: 850;
+}
+.shipping-reference { border: 1px solid #bfdbfe; border-radius: 12px; padding: 11px; background: #eff6ff; }
+.shipping-reference strong { display: block; color: #1e3a8a; font-size: .78rem; }
+.shipping-reference p { margin: 5px 0 0; color: #475569; font-size: .65rem; line-height: 1.5; }
+.shipping-reference a { color: #1d4ed8; font-weight: 800; }
+.shipping-reference .shipping-warning { color: #9a3412; font-weight: 750; }
+.profit-form input[readonly] { background: #f1f5f9; color: #334155; font-weight: 800; }
 .check-row {
   grid-column: 1 / -1; display: flex !important; align-items: center; gap: 9px; min-height: 43px;
   padding: 9px 10px; border: 1px solid var(--line); border-radius: 11px; background: #fffdf5;

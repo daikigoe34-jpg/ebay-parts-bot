@@ -46,11 +46,13 @@ jobs:
           node tests/web_core.test.cjs
           node tests/sw_core.test.cjs
           node tests/data_freshness.test.cjs
+          node --test tests/shipping.test.cjs
           node --test tests/accuracy_regression.test.cjs tests/persistence.test.cjs tests/sw_offline.test.cjs
       - name: Syntax checks
         run: |
           python -m py_compile scripts/core.py scripts/research.py
           node --check web/app.js
+          node --check web/shipping.js
           node --check web/sw.js
           node --check web/sw_core.js
           python -m json.tool web/manifest.webmanifest >/dev/null
