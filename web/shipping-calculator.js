@@ -8,6 +8,8 @@
   const store = PartScoutPersistence.createStore(storage);
   let partLookup = PartScoutLookup.emptyState();
   let lookup;
+  let workspaceSync;
+  let researchQueue;
   let editRevision = 0;
   let importGeneration = 0;
   const controls = [...form.elements].filter(x => x.name);
@@ -33,6 +35,7 @@
   function save() {
     const result = store.write(key, snapshot());
     status.textContent = result.ok ? "保存済み。この端末・ブラウザで続きから再開できます。" : "端末に保存できません。この見積をバックアップしてください。";
+    if (result.ok) { workspaceSync?.changed(); researchQueue?.capture(snapshot()); }
     render();
     return result.ok;
   }
@@ -85,10 +88,43 @@
       PartScoutLookup.invalidateAll();
       if (!store.write(key, value.data).ok) throw new Error("保存できないため、復元を中止しました。");
       restore(value.data); mountLookup(); render();
+      workspaceSync?.changed(); researchQueue?.capture(snapshot());
       status.textContent = "見積を復元しました。";
     } catch (error) { if (generation === importGeneration) status.textContent = error.message || "復元できませんでした。"; }
     finally { if (generation === importGeneration) fileInput.value = ""; }
   });
+  function validateSyncedDraft(value) {
+    if (!validDraft(value)) throw Error("見積の形式が違います。");
+    if (Object.hasOwn(value, "partLookup")) value = {...value,partLookup:PartScoutLookup.validateState(value.partLookup)};
+    return value;
+  }
+  function applyDraft(value) {
+    value = validateSyncedDraft(value);
+    if (!store.write(key, value).ok) return false;
+    editRevision++; importGeneration++;
+    PartScoutLookup.invalidateAll();
+    restore(value); mountLookup(); render();
+    return true;
+  }
+  if (typeof PartScoutSync !== "undefined") {
+    workspaceSync = PartScoutSync.mountStatus(document.querySelector("#shipping-sync"), {
+      namespace:"shipping",storage,getLocal:snapshot,hasLocal:()=>store.read(key,null)!==null,
+      validate:validateSyncedDraft,
+      canApply:()=>!document.activeElement?.matches("#parcel-form input, #parcel-form select, #part-lookup input, #part-lookup select"),
+      applyRemote:applyDraft,
+    });
+    workspaceSync.start();
+  }
+  if (typeof PartScoutQueue !== "undefined") {
+    researchQueue = PartScoutQueue.mount(document.querySelector("#research-queue"), {adapter:{
+      capture:snapshot,
+      apply:value=>{if(!applyDraft(value))return false;workspaceSync?.changed();return true;},
+      fresh:item=>({region:"US48",weightKg:"",declaredValueUsd:"",lengthCm:"",widthCm:"",heightCm:"",
+        partLookup:{...PartScoutLookup.emptyState(),make:item.manufacturer,forms:{standalone:{make:item.manufacturer,part:item.partNumber}}}}),
+    }});
+    const requested = new URL(location.href).searchParams.get("research");
+    if (requested) researchQueue.resumeRequested(requested);
+  }
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(() => {});
   render();
 })();
