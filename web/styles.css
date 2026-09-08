@@ -268,3 +268,16 @@ footer .secondary-button { width: 100%; }
   .metric-grid strong { font-size: .7rem; }
   .auto-cost-grid strong { font-size: .62rem; }
 }
+
+/* Shared lookup controls on the standalone calculator and product cards. */
+.part-lookup { padding: 16px; margin: 16px 0; border: 1px solid #b8c6d8; border-radius: 12px; background: #f8fafc; overflow-wrap: anywhere; }
+.part-lookup h3 { margin: 0 0 14px; font-size: 1.05rem; }
+.lookup-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin: 12px 0; }
+.lookup-grid label { display: grid; gap: 6px; font-size: .9rem; }
+.lookup-grid input,.lookup-grid select { width: 100%; min-width: 0; box-sizing: border-box; padding: 10px; min-height: 44px; border: 1px solid #94a3b8; border-radius: 6px; background: white; font: inherit; }
+.part-lookup button { padding: 10px 12px; min-height: 44px; margin: 4px 8px 4px 0; border: 1px solid #64748b; border-radius: 8px; font: inherit; cursor: pointer; }
+.part-lookup [data-lookup-action] { background: #164e63; color: #fff; border-color: #164e63; }
+.part-lookup summary { cursor: pointer; padding: 12px 0; }
+.lookup-sources,.lookup-boxes,.part-lookup p { font-size: .88rem; line-height: 1.65; }
+.part-lookup [hidden] { display: none; }
+@media(max-width:380px) { .lookup-grid { grid-template-columns: 1fr; } .part-lookup { padding: 12px; } }

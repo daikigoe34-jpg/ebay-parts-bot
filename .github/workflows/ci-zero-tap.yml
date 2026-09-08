@@ -9,6 +9,9 @@ on:
       - main
     paths:
       - "web/**"
+      - "server/**"
+      - "package.json"
+      - "package-lock.json"
       - "scripts/**"
       - "tests/**"
       - "config/**"
@@ -32,6 +35,13 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           persist-credentials: false
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install test dependencies
+        run: npm ci --ignore-scripts
       - name: Setup Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
@@ -43,6 +53,7 @@ jobs:
         run: python -m pytest -q
       - name: JavaScript tests
         run: |
+          npm run test:metadata
           node tests/web_core.test.cjs
           node tests/sw_core.test.cjs
           node tests/data_freshness.test.cjs
@@ -53,6 +64,10 @@ jobs:
           python -m py_compile scripts/core.py scripts/research.py
           node --check web/app.js
           node --check web/shipping.js
+          node --check web/shipping-calculator.js
+          node --check web/part-parcel.js
+          node --check web/part-lookup-ui.js
+          node --check server/part-metadata.mjs
           node --check web/sw.js
           node --check web/sw_core.js
           python -m json.tool web/manifest.webmanifest >/dev/null
