@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0f172a">
+  <title>送料の見積｜Part Scout</title>
+  <link rel="stylesheet" href="./styles.css">
+  <style>
+    main{max-width:640px;margin:auto;padding:20px 16px 40px}h1{font-size:1.6rem}a{color:#2563eb}
+    .parcel-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.parcel-grid label{display:grid;gap:6px;font-size:1rem;min-width:0}
+    .parcel-grid input,.parcel-grid select{font:inherit;width:100%;min-width:0;padding:12px;border:1px solid #94a3b8;border-radius:8px;box-sizing:border-box}
+    .wide-field{grid-column:1/-1}.quote-box{margin:22px 0;padding:18px;background:#fff;border:1px solid #cbd5e1;border-radius:12px}
+    #shipping-price{font-size:2rem;display:block;margin:8px 0}#quote-detail{line-height:1.8;white-space:pre-line}
+    .calc-note{font-size:.9rem;line-height:1.6;color:#475569}#calc-save{font-size:.9rem}button{font:inherit;padding:10px 14px;min-height:44px;cursor:pointer}.backup-tools{display:flex;gap:10px;flex-wrap:wrap}
+    @media(max-width:340px){.parcel-grid{grid-template-columns:1fr}.wide-field{grid-column:auto}}
+  </style>
+</head>
+<body>
+<main>
+  <a href="./index.html">← リサーチへ</a>
+  <h1>SpeedPAK Economy送料</h1>
+  <section id="part-lookup"></section>
+  <p>荷物の重量・外寸を実測した場合は、下の入力を編集してください。</p>
+  <form id="parcel-form" class="parcel-grid" autocomplete="off">
+    <label class="wide-field">発送先<select name="region"><option value="US48">日本 → 米国本土48州を想定</option><option value="OTHER">本土48州以外・他の国</option></select></label>
+    <label>重量（kg）<input name="weightKg" type="text" inputmode="decimal" placeholder="例：0.5"></label>
+    <label>商品申告額（荷物全体 USD）<input name="declaredValueUsd" type="text" inputmode="decimal" placeholder="送料を除く全商品の合計額"></label>
+    <label>長さ（cm）<input name="lengthCm" type="text" inputmode="decimal" placeholder="例：20"></label>
+    <label>幅（cm）<input name="widthCm" type="text" inputmode="decimal" placeholder="例：15"></label>
+    <label>高さ（cm）<input name="heightCm" type="text" inputmode="decimal" placeholder="例：10"></label>
+  </form>
+  <p id="calc-save" role="status">入力はこの端末・ブラウザに自動保存されます。</p>
+  <section class="quote-box" aria-live="polite" aria-atomic="true">
+    <span>参考送料（燃油込み・関税別）</span>
+    <strong id="shipping-price">未確定</strong>
+    <div id="quote-detail">重量・寸法・商品申告額を入力してください。</div>
+  </section>
+  <p class="calc-note">2026年3月25日発効の<a href="https://static.orangeconnex.com/capricorn/selfQuery/1141130239112384512.pdf" target="_blank" rel="noopener noreferrer">公式料金表</a>による参考計算です。料金改定の自動取得はしていません。最終金額は<a href="https://cpass.ebay.com/" target="_blank" rel="noopener noreferrer">CPaSS</a>で確認してください。危険物・電池を含む商品は対象外です。</p>
+  <div class="backup-tools"><button id="calc-export" type="button">この見積をバックアップ</button><button id="calc-import" type="button">復元</button><input id="calc-file" type="file" accept=".json,application/json" hidden></div>
+  <p class="calc-note">この画面の見積は、リサーチの商品別原価とは別に保存されます。</p>
+</main>
+<script src="./persistence.js" defer></script>
+<script src="./shipping.js" defer></script>
+<script src="./part-parcel.js" defer></script>
+<script src="./part-lookup-ui.js" defer></script>
+<script src="./shipping-calculator.js" defer></script>
+</body>
+</html>

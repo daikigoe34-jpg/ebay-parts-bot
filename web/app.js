@@ -7,6 +7,11 @@ const Shipping = typeof PartScoutShipping !== "undefined"
 const localStore = Persistence.createStore((() => {
   try { return typeof localStorage !== "undefined" ? localStorage : null; } catch (_) { return null; }
 })());
+const Lookup = typeof PartScoutLookup !== "undefined" ? PartScoutLookup : null;
+const lookupControllers = new Set();
+const cardLookups = new WeakMap();
+let userEditRevision = 0;
+let importGeneration = 0;
 const USER_DATA_KEY = "part-scout-user-v1";
 const RESULT_CACHE_KEY = "part-scout-results-v1";
 
@@ -154,6 +159,7 @@ const state = {
   sort: "profit",
   workspace: { tab: "today", expanded: [], scrollY: 0 },
   offline: false,
+  partLookup: Lookup?.emptyState() || null,
 };
 
 function isRecord(value) {
@@ -179,10 +185,15 @@ function validateUserData(value) {
       if (typeof v === "number" && !Number.isFinite(v)) throw new Error("金額が数値ではありません。");
     }
   }
+  if (value.partLookup != null) {
+    if (!Lookup) throw new Error("品番見積を読み込めません。");
+    value = { ...value, partLookup: Lookup.validateState(value.partLookup) };
+  }
   return value;
 }
 
 function applyUserData(data) {
+  state.partLookup = data.partLookup || Lookup?.emptyState() || null;
   state.settings = { ...DEFAULT_SETTINGS };
   for (const key of Object.keys(DEFAULT_SETTINGS)) {
     if (Object.hasOwn(data.settings, key)) state.settings[key] = data.settings[key];
@@ -200,6 +211,7 @@ function applyUserData(data) {
 let saveFailed = false;
 function userDataSnapshot() {
   return { settings: state.settings, costs: state.costs,
+    ...(state.partLookup ? {partLookup: state.partLookup} : {}),
     workspace: { ...state.workspace, filter: state.filter, sort: state.sort }, savedAt: new Date().toISOString() };
 }
 
@@ -213,6 +225,7 @@ function showSaveStatus(ok, message) {
 }
 
 function persistUserData() {
+  userEditRevision++;
   const result = saveJson(USER_DATA_KEY, userDataSnapshot());
   showSaveStatus(result.ok);
   return result.ok;
@@ -227,6 +240,7 @@ function restoreBackup(text) {
   const parsed = JSON.parse(text);
   if (parsed?.format !== "part-scout-backup" || parsed.version !== 1) throw new Error("Part Scoutのバックアップを選んでください。");
   const data = validateUserData(parsed.data);
+  Lookup?.invalidateAll();
   if (!saveJson(USER_DATA_KEY, data).ok) throw new Error("保存領域が不足しています。現在のデータは変更していません。");
   applyUserData(data);
   return true;
@@ -1049,6 +1063,8 @@ function updateGlobalNextTask(sorted) {
 }
 
 function render() {
+  for (const lookup of lookupControllers) lookup.dispose();
+  lookupControllers.clear();
   mergeProducts();
   const visible = getVisibleProducts();
   const allSorted = [...state.products].sort((a, b) => productSortValue(b, "profit") - productSortValue(a, "profit"));
@@ -1146,9 +1162,37 @@ function createProductCard(product, rank) {
 
     input.addEventListener(input.type === "checkbox" || input.tagName === "SELECT" ? "change" : "input", () => {
       updateCostValue(product, key, input.type === "checkbox" ? input.checked : input.value);
+      if (key === "shippingMethod" && input.value !== "speedpak_economy_us") cardLookups.get(card)?.manualEdit();
+      else if (["shippingRegion", "salePriceUsd", "shippingMethod"].includes(key)) cardLookups.get(card)?.contextChanged();
+      else if (["parcelWeightKg", "parcelLengthCm", "parcelWidthCm", "parcelHeightCm"].includes(key)) cardLookups.get(card)?.manualEdit();
       persistUserData();
       updateAllCardsForProduct(product.part_number);
     });
+  }
+  if (Lookup && card.querySelector(".part-lookup-slot")) {
+    const mapping = {weightKg:"parcelWeightKg", lengthCm:"parcelLengthCm", widthCm:"parcelWidthCm", heightCm:"parcelHeightCm"};
+    const invalidateConfirmations = () => {
+      const cost = state.costs[product.part_number] ||= {};
+      cost.supplierConfirmed = false; cost.tariffConfirmed = false;
+      persistUserData(); updateAllCardsForProduct(product.part_number);
+    };
+    const lookup = Lookup.mount(card.querySelector(".part-lookup-slot"), {
+      singleItem: true, key: `product:${product.part_number}`, defaults: {make:String(product.brand || "").toUpperCase(), part:product.part_number},
+      getState: () => state.partLookup, save: persistUserData, getRevision: () => userEditRevision,
+      getContext: () => { const values = getCostValues(product); return {region:values.shippingRegion, declaredValueUsd:values.salePriceUsd}; },
+      readParcel: () => { const values = getCostValues(product); return Object.fromEntries(Object.entries(mapping).map(([k,v])=>[k,Number(values[v])])); },
+      applyParcel: parcel => {
+        updateCostValue(product,"shippingMethod","speedpak_economy_us");
+        for (const [key,value] of Object.entries(parcel)) updateCostValue(product,mapping[key],String(value));
+        updateAllCardsForProduct(product.part_number);
+      },
+      clearParcel: () => {
+        for (const field of Object.values(mapping)) updateCostValue(product,field,"");
+        updateAllCardsForProduct(product.part_number);
+      },
+      onSettingsChange: invalidateConfirmations,
+    });
+    cardLookups.set(card,lookup); lookupControllers.add(lookup);
   }
   updateProfitArea(card, product);
   return fragment;
@@ -1462,17 +1506,26 @@ function bindEvents() {
   document.querySelector("#restore-file")?.addEventListener("change", async event => {
     const file = event.target.files?.[0];
     if (!file) return;
+    Lookup?.invalidateAll();
+    const revision = userEditRevision;
+    const generation = ++importGeneration;
     try {
       if (file.size > 5_000_000) throw new Error("5MB以下のバックアップを選んでください。");
-      restoreBackup(await file.text());
+      const text = await file.text();
+      if (generation !== importGeneration) return;
+      if (revision !== userEditRevision) throw new Error("入力が変更されたため復元を中止しました。");
+      restoreBackup(text);
       populateSettingsForm();
       els.filterInput.value = state.filter;
       els.sortSelect.value = state.sort;
       activateTab(state.workspace.tab, false);
       render();
       showSaveStatus(true, "バックアップを復元しました。");
-    } catch (error) { showSaveStatus(!saveFailed, error.message); }
-    event.target.value = "";
+    } catch (error) {
+      if (generation === importGeneration) showSaveStatus(!saveFailed, error.message);
+    } finally {
+      if (generation === importGeneration) event.target.value = "";
+    }
   });
   document.querySelector("#refresh-button")?.addEventListener("click", loadData);
   els.setupPrimary?.addEventListener("click", (event) => {
