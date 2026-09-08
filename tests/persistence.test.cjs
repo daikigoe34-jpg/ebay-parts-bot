@@ -59,3 +59,24 @@ test("settings are durable before the render debounce fires, and backup import v
   assert.throws(() => api.restoreBackup(JSON.stringify({format: "part-scout-backup", version: 1,
     data: { settings: {}, costs: { "__proto__": [] }, workspace: [] } })));
 });
+
+test("guarded stores archive the actual durable edit and stale proposal without overwriting", () => {
+  const { createStore } = require("../web/persistence.js");
+  const storage = memoryStorage(); storage.setItem("draft", JSON.stringify({weight:"1"}));
+  const a=createStore(storage,{guardedKeys:["draft"]}), b=createStore(storage,{guardedKeys:["draft"]});
+  a.read("draft",null);b.read("draft",null);
+  assert.equal(a.write("draft",{weight:"UNSENT_A"}).ok,true);
+  assert.deepEqual(b.write("draft",{weight:"STALE_B"}),{ok:false,conflict:true});
+  assert.equal(JSON.parse(storage.getItem("draft")).weight,"UNSENT_A");
+  const reopened=createStore(storage,{guardedKeys:["draft"]});reopened.read("draft",null);reopened.write("draft",{weight:"NEW_A"});
+  const archive=reopened.conflicts("draft");
+  assert.equal(archive[0].remote.weight,"UNSENT_A");assert.equal(archive[0].local.weight,"STALE_B");
+});
+
+test("guarded stale write fails safely when permanent recovery cannot be saved", () => {
+  const {createStore}=require("../web/persistence.js");const storage=memoryStorage();
+  storage.setItem("draft",JSON.stringify({weight:"1"}));const store=createStore(storage,{guardedKeys:["draft"]});store.read("draft",null);
+  storage.setItem("draft",JSON.stringify({weight:"OTHER_TAB"}));storage.setItem=()=>{throw Error("quota");};
+  assert.equal(store.write("draft",{weight:"STALE"}).ok,false);
+  assert.equal(JSON.parse(storage.getItem("draft")).weight,"OTHER_TAB");
+});

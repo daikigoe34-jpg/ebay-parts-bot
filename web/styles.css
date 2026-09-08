@@ -281,3 +281,12 @@ footer .secondary-button { width: 100%; }
 .lookup-sources,.lookup-boxes,.part-lookup p { font-size: .88rem; line-height: 1.65; }
 .part-lookup [hidden] { display: none; }
 @media(max-width:380px) { .lookup-grid { grid-template-columns: 1fr; } .part-lookup { padding: 12px; } }
+
+.workspace-sync,.research-queue{margin:16px 0;padding:16px;border:1px solid #cbd5e1;border-radius:12px;background:#fff;color:#0f172a;overflow-wrap:anywhere}
+.workspace-actions{display:flex;flex-wrap:wrap;gap:10px;align-items:end}
+.workspace-sync button,.research-queue button{min-height:44px;padding:10px 14px;font:inherit;white-space:normal}
+.research-queue label{display:grid;gap:6px;margin:10px 0;min-width:0}
+.research-queue input,.research-queue select,.research-queue textarea{font:inherit;min-height:44px;padding:10px;max-width:100%;width:100%;box-sizing:border-box;border:1px solid #94a3b8;border-radius:8px}
+.research-item{border-top:1px solid #e2e8f0;margin-top:16px;padding-top:8px}
+.research-item h3{font-size:1.05rem}.research-queue textarea{resize:vertical}
+@media(max-width:480px){.research-queue .workspace-actions>label{width:100%}.workspace-sync,.research-queue{padding:12px}}

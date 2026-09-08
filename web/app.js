@@ -6,12 +6,14 @@ const Shipping = typeof PartScoutShipping !== "undefined"
   ? PartScoutShipping : require("./shipping.js");
 const localStore = Persistence.createStore((() => {
   try { return typeof localStorage !== "undefined" ? localStorage : null; } catch (_) { return null; }
-})());
+})(), {guardedKeys:["part-scout-user-v1"]});
 const Lookup = typeof PartScoutLookup !== "undefined" ? PartScoutLookup : null;
 const lookupControllers = new Set();
 const cardLookups = new WeakMap();
 let userEditRevision = 0;
 let importGeneration = 0;
+let workspaceSync;
+let lastUserSnapshot;
 const USER_DATA_KEY = "part-scout-user-v1";
 const RESULT_CACHE_KEY = "part-scout-results-v1";
 
@@ -224,10 +226,17 @@ function showSaveStatus(ok, message) {
   el.classList.toggle("save-error", !ok);
 }
 
+function syncSnapshot() {
+  const {savedAt, ...data} = userDataSnapshot();
+  return data;
+}
 function persistUserData() {
+  const stable = JSON.stringify(syncSnapshot());
+  if (stable === lastUserSnapshot) return !saveFailed;
   userEditRevision++;
   const result = saveJson(USER_DATA_KEY, userDataSnapshot());
-  showSaveStatus(result.ok);
+  if (result.ok) { lastUserSnapshot = stable; workspaceSync?.changed(); }
+  showSaveStatus(result.ok, result.conflict ? "別のタブで編集が保存されました。両方をバックアップして再読み込みしてください。" : undefined);
   return result.ok;
 }
 
@@ -243,6 +252,8 @@ function restoreBackup(text) {
   Lookup?.invalidateAll();
   if (!saveJson(USER_DATA_KEY, data).ok) throw new Error("保存領域が不足しています。現在のデータは変更していません。");
   applyUserData(data);
+  lastUserSnapshot = JSON.stringify(syncSnapshot());
+  workspaceSync?.changed();
   return true;
 }
 
@@ -1542,7 +1553,26 @@ try {
   if (saved) applyUserData(validateUserData(saved));
 } catch (_) { /* Keep readable legacy data; never overwrite an incompatible save. */ }
 
+lastUserSnapshot = JSON.stringify(syncSnapshot());
 if (typeof document !== "undefined") {
+  if (typeof PartScoutSync !== "undefined") {
+    let storage; try { storage = localStorage; } catch (_) {}
+    workspaceSync = PartScoutSync.mountStatus(document.querySelector("#main-sync"), {
+      namespace:"main",storage,getLocal:syncSnapshot,backupExtras:()=>({tabConflicts:localStore.conflicts(USER_DATA_KEY)}),
+      hasLocal:()=>loadJson(USER_DATA_KEY,null)!==null || Object.values(STORAGE_KEYS).flat().some(key=>loadJson(key,null)!==null),
+      validate:value=>{ const {savedAt,...data} = validateUserData(value); return data; },
+      canApply:()=>!document.activeElement?.matches("input, textarea, select"),
+      applyRemote:data=>{
+        if (!saveJson(USER_DATA_KEY,data).ok) return false;
+        userEditRevision++; importGeneration++; clearTimeout(settingsSaveTimer);
+        Lookup?.invalidateAll(); applyUserData(data);
+        lastUserSnapshot = JSON.stringify(syncSnapshot());
+        populateSettingsForm(); els.filterInput.value=state.filter; els.sortSelect.value=state.sort;
+        activateTab(state.workspace.tab,false); render(); return true;
+      },
+    });
+  }
+  if (typeof PartScoutQueue !== "undefined") PartScoutQueue.mount(document.querySelector("#research-queue"));
   const cached = loadJson(RESULT_CACHE_KEY, null);
   if (usablePayload(cached?.payload) && isRecord(cached?.setup)) {
     state.apiPayload = cached.payload;
@@ -1557,16 +1587,17 @@ if (typeof document !== "undefined") {
   render();
   if (localStore.recovered) showSaveStatus(true, "直前の保存データから復元しました。");
   loadData();
+  workspaceSync?.start();
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
       state.workspace.scrollY = window.scrollY;
-      persistSettings();
+      persistUserData();
     }
     if (!document.hidden && shouldRefreshData(lastLoadedAt)) loadData();
   });
   window.addEventListener("pagehide", () => {
     state.workspace.scrollY = window.scrollY;
-    persistSettings();
+    persistUserData();
   });
   window.addEventListener("online", loadData);
   window.addEventListener("offline", () => {

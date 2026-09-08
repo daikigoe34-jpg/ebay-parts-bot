@@ -1,6 +1,11 @@
 {
   "name": "part-scout-checks",
   "private": true,
-  "scripts": {"test:metadata": "node --test tests/part_metadata.test.mjs tests/part_parcel.test.cjs tests/part_lookup_ui.test.cjs"},
-  "devDependencies": {"jsdom": "26.1.0"}
+  "scripts": {
+    "test:metadata": "node --test tests/part_metadata.test.mjs tests/part_parcel.test.cjs tests/part_lookup_ui.test.cjs",
+    "test:workspace": "node --test tests/workspace_sync.test.cjs tests/research_queue.test.cjs tests/workspace_dom.test.cjs tests/workspace_api.test.mjs"
+  },
+  "devDependencies": {
+    "jsdom": "26.1.0"
+  }
 }
