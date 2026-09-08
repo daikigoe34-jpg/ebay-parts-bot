@@ -18,6 +18,7 @@
       <p class="eyebrow">EBAY MOTORS / PRODUCTION API</p>
       <h1>Part Scout</h1>
       <p id="run-status" class="header-status">データを読み込んでいます…</p>
+      <p id="save-status" class="header-status" role="status">入力はこの端末に自動保存されます</p>
     </div>
   </header>
 
@@ -42,7 +43,8 @@
       </div>
     </section>
 
-    <section id="automation-panel" class="automation-panel" aria-label="自動化状況">
+    <details id="automation-panel" class="automation-panel" aria-label="自動化状況">
+      <summary>自動調査の状況を見る</summary>
       <div class="automation-title-row">
         <div>
           <span class="step-kicker">毎日ほぼ自動</span>
@@ -56,7 +58,7 @@
         <li><span class="flow-number">3</span><div><strong>国内仕入価格を探索</strong><small id="flow-procurement">設定状況を確認中</small></div></li>
         <li><span class="flow-number">4</span><div><strong>利益順に並べて次の操作を表示</strong><small>人が確認するのは最終候補だけです</small></div></li>
       </ol>
-    </section>
+    </details>
 
     <section class="summary-grid" aria-label="集計">
       <article class="summary-card"><span>候補</span><strong id="summary-count">–</strong></article>
@@ -120,47 +122,69 @@
               <option value="basic_plus">Basic以上</option>
             </select>
           </label>
-          <label>前々月のeBay売上（USD）<input name="monthlySalesUsd" type="number" min="0" step="100"></label>
-          <p class="muted">海外決済手数料の売上割引を自動計算します。</p>
+          <label>前々月のeBay売上（USD）<input name="monthlySalesUsd" type="number" inputmode="decimal" min="0" step="100"></label>
+          <label class="check-row simple-check"><input name="internationalDiscountConfirmed" type="checkbox">海外決済手数料の割引適用をeBay画面で確認済み</label>
+          <p class="muted">未確認なら日本セラーの基本料率1.35%で計算します。</p>
           <label class="check-row simple-check"><input name="autoExchangeRate" type="checkbox">為替を毎日自動更新</label>
-          <label>手動為替（1 USD＝円）<input name="exchangeRate" type="number" min="1" step="0.01"></label>
-          <label>米国売上税の仮定（%）<input name="buyerSalesTaxRate" type="number" min="0" step="0.01"></label>
-          <label>出品手数料／1件（USD）<input name="insertionFeeUsd" type="number" min="0" step="0.01"></label>
+          <label>手動為替（1 USD＝円）<input name="exchangeRate" type="number" inputmode="decimal" min="1" step="0.01"></label>
+          <label>米国売上税の仮定（%）<input name="buyerSalesTaxRate" type="number" inputmode="decimal" min="0" step="0.01"></label>
+          <label>出品手数料／1件（USD）<input name="insertionFeeUsd" type="number" inputmode="decimal" min="0" step="0.01"></label>
           <p class="muted">無料出品枠内なら0のままです。</p>
         </article>
 
         <article class="panel-card">
           <h2>Payoneer・リスク</h2>
-          <label>Payoneer出金率（%）<input name="payoneerWithdrawalRate" type="number" min="0" max="10" step="0.1"></label>
+          <label>Payoneer出金率（%）<input name="payoneerWithdrawalRate" type="number" inputmode="decimal" min="0" max="10" step="0.1"></label>
           <p class="muted">初期値3%。ご自身のPayoneer画面の実料率へ1回だけ合わせます。</p>
-          <label>Payoneer固定費／1件（円）<input name="payoneerFixedJpy" type="number" min="0" step="1"></label>
+          <label>Payoneer固定費／1件（円）<input name="payoneerFixedJpy" type="number" inputmode="decimal" min="0" step="1"></label>
           <label class="check-row simple-check"><input name="includePayoneerAnnualFee" type="checkbox">年間アカウント手数料を自動配賦</label>
-          <label>年間手数料の手動配賦（円・0で自動）<input name="payoneerAnnualAllocationJpy" type="number" min="0" step="1"></label>
-          <label>広告率（%）<input name="promotedRate" type="number" min="0" step="0.1"></label>
-          <label>返品・不良引当（%）<input name="returnReserveRate" type="number" min="0" step="0.1"></label>
-          <label>追加落札手数料（%）<input name="additionalFvfRate" type="number" min="0" step="0.1"></label>
+          <label>年間手数料の手動配賦（円・0で自動）<input name="payoneerAnnualAllocationJpy" type="number" inputmode="decimal" min="0" step="1"></label>
+          <label>広告率（%）<input name="promotedRate" type="number" inputmode="decimal" min="0" step="0.1"></label>
+          <label>返品・不良引当（%）<input name="returnReserveRate" type="number" inputmode="decimal" min="0" step="0.1"></label>
+          <label>追加落札手数料（%）<input name="additionalFvfRate" type="number" inputmode="decimal" min="0" step="0.1"></label>
+          <label class="check-row simple-check"><input name="feesConfirmed" type="checkbox">Payoneerの出金料・年間料とeBayの追加手数料を本人画面で確認済み</label>
+          <p class="muted">年間料の自動配賦は概算です。実契約に合わせ、不要なら自動配賦を外してください。</p>
         </article>
 
         <article class="panel-card">
           <h2>判定基準</h2>
-          <label>小型部品の国際送料（円）<input name="defaultInternationalShippingJpy" type="number" min="0" step="100"></label>
-          <label>梱包費（円）<input name="defaultPackagingJpy" type="number" min="0" step="10"></label>
-          <label>国内送料の初期値（円）<input name="defaultDomesticShippingJpy" type="number" min="0" step="100"></label>
-          <label>最低利益（円）<input name="minimumProfitJpy" type="number" min="0" step="100"></label>
-          <label>最低利益率（%）<input name="minimumMarginRate" type="number" min="0" step="0.1"></label>
-          <label>最低90日販売下限<input name="minimumSold90d" type="number" min="0" step="1"></label>
-          <label>最低市場スコア<input name="minimumMarketScore" type="number" min="0" max="100" step="1"></label>
-          <label>最低「販売÷競合」<input name="minimumDemandRatio" type="number" min="0" step="0.01"></label>
+          <label>小型部品の国際送料（円）<input name="defaultInternationalShippingJpy" type="number" inputmode="decimal" min="0" step="100"></label>
+          <label>梱包費（円）<input name="defaultPackagingJpy" type="number" inputmode="decimal" min="0" step="10"></label>
+          <label>国内送料の初期値（円）<input name="defaultDomesticShippingJpy" type="number" inputmode="decimal" min="0" step="100"></label>
+          <label>最低利益（円）<input name="minimumProfitJpy" type="number" inputmode="decimal" min="0" step="100"></label>
+          <label>最低利益率（%）<input name="minimumMarginRate" type="number" inputmode="decimal" min="0" step="0.1"></label>
+          <label>最低90日換算下限（推定）<input name="minimumSold90d" type="number" inputmode="decimal" min="0" step="1"></label>
+          <label>最低市場スコア<input name="minimumMarketScore" type="number" inputmode="decimal" min="0" max="100" step="1"></label>
+          <label>最低「販売÷競合」<input name="minimumDemandRatio" type="number" inputmode="decimal" min="0" step="0.01"></label>
           <p class="muted">変更内容は自動保存されます。</p>
           <button id="reset-settings-button" class="secondary-button" type="button">推奨値へ戻す</button>
         </article>
       </form>
+
+      <article class="panel-card">
+        <h2>保存と再開</h2>
+        <p>入力・設定・開いた商品をこのブラウザに自動保存します。別端末への移行やサイトデータの削除に備える場合はバックアップを保存してください。</p>
+        <p class="muted">バックアップの復元は現在の入力・設定を置き換えます。Safariとホーム画面で保存領域が分かれる場合があるため、普段は同じ開き方を使ってください。</p>
+        <div class="backup-actions">
+          <button id="backup-button" type="button" class="secondary-button">バックアップを保存</button>
+          <label class="secondary-button">バックアップを復元<input id="restore-file" type="file" accept=".json,application/json"></label>
+          <button id="refresh-button" type="button" class="secondary-button">最新データを読み込む</button>
+        </div>
+      </article>
 
       <article class="panel-card fee-note-card">
         <h2>利益計算に含めるもの</h2>
         <p>eBay落札手数料、注文固定料、海外決済手数料、日本の消費税、Payoneer出金費、関税の一次概算、広告、返品引当、仕入、国内送料、国際送料、梱包費です。</p>
         <p class="muted">関税は確定税率ではありません。最終候補だけHTSUS・原産国・DDP実見積を確認すると「購入候補」へ進みます。</p>
       </article>
+      <details class="panel-card fee-note-card">
+        <summary>米国関税の確認（2026-09-08）</summary>
+        <p>日本原産で自動車部品の232条対象なら、通常税率が15%未満の場合は合計15%。通常税率が15%以上なら追加232税率は0%です。日本から発送するだけでは日本原産になりません。</p>
+        <p>232条対象外で、新しい強制労働301条関税の対象となる日本原産品は、通常税率が12.5%未満ならその合計が12.5%。通常税率が12.5%以上なら、この追加301税率は0%です。232条対象品には、この301条関税を重ねません。</p>
+        <p>旧IEEPA関税は2026年2月に徴収終了。暫定122条関税は7月24日が適用期限です。800ドル以下の販売品も免税と仮定しません。</p>
+        <p>「試算率」は対象分類未確認の仮定です。金属製品等の別措置や除外品もあるため、現在のHTSUS・原産国・申告額・配送方法に合ったDDP実見積を優先します。制度変更を自動解釈する機能はありません。</p>
+        <p class="muted"><a href="https://content.govdelivery.com/accounts/USDHSCBP/bulletins/3f2c91c" target="_blank" rel="noopener noreferrer">CBP：日本の自動車部品</a> ／ <a href="https://content.govdelivery.com/accounts/USDHSCBP/bulletins/421d887" target="_blank" rel="noopener noreferrer">CBP：2026年7月の追加関税</a> ／ <a href="https://content.govdelivery.com/accounts/USDHSCBP/bulletins/40b11c9" target="_blank" rel="noopener noreferrer">CBP：旧関税の終了</a> ／ <a href="https://www.federalregister.gov/documents/2026/06/24/2026-12669/indefinite-suspension-of-the-de-minimis-exemption-for-mail-shipments-and-new-postal-informal-entry" target="_blank" rel="noopener noreferrer">米国官報：少額郵便物</a></p>
+      </details>
     </section>
   </main>
 
@@ -187,7 +211,7 @@
       <p class="product-title"></p>
 
       <div class="metric-grid">
-        <div><span>90日販売下限</span><strong class="sold-value"></strong></div>
+        <div><span>90日換算下限（推定）</span><strong class="sold-value"></strong></div>
         <div><span>競合</span><strong class="competition-value"></strong></div>
         <div><span>eBay出品相場</span><strong class="price-value"></strong></div>
         <div><span>予想利益</span><strong class="profit-value-main"></strong></div>
@@ -205,7 +229,7 @@
           <div><span>仕入</span><strong class="procurement-value"></strong></div>
           <div><span>国際送料</span><strong class="shipping-value"></strong></div>
           <div><span>原産国</span><strong class="origin-value"></strong></div>
-          <div><span>関税率</span><strong class="tariff-rate-value"></strong></div>
+          <div><span>関税見積／試算</span><strong class="tariff-rate-value"></strong></div>
         </div>
       </section>
 
@@ -223,12 +247,12 @@
       <details class="profit-details">
         <summary>金額を修正・最終確認</summary>
         <div class="profit-form">
-          <label>販売価格（USD）<input data-cost="salePriceUsd" type="number" min="0" step="0.01"></label>
-          <label>購入者負担送料（USD）<input data-cost="buyerShippingUsd" type="number" min="0" step="0.01"></label>
-          <label>仕入価格（円）<input data-cost="procurementJpy" type="number" min="0" step="1"></label>
-          <label>国内送料（円）<input data-cost="domesticShippingJpy" type="number" min="0" step="1"></label>
-          <label>国際送料（円）<input data-cost="internationalShippingJpy" type="number" min="0" step="1"></label>
-          <label>梱包費（円）<input data-cost="packagingJpy" type="number" min="0" step="1"></label>
+          <label>販売価格（USD）<input data-cost="salePriceUsd" type="number" inputmode="decimal" min="0" step="0.01"></label>
+          <label>購入者負担送料（USD）<input data-cost="buyerShippingUsd" type="number" inputmode="decimal" min="0" step="0.01"></label>
+          <label>仕入価格（円）<input data-cost="procurementJpy" type="number" inputmode="decimal" min="0" step="1"></label>
+          <label>国内送料（円）<input data-cost="domesticShippingJpy" type="number" inputmode="decimal" min="0" step="1"></label>
+          <label>国際送料（円）<input data-cost="internationalShippingJpy" type="number" inputmode="decimal" min="0" step="1"></label>
+          <label>梱包費（円）<input data-cost="packagingJpy" type="number" inputmode="decimal" min="0" step="1"></label>
           <label>原産国
             <select data-cost="originCode">
               <option value="">不明</option>
@@ -237,13 +261,21 @@
               <option value="CN">中国</option>
               <option value="KR">韓国</option>
               <option value="TW">台湾</option>
+              <option value="TH">タイ</option>
+              <option value="MX">メキシコ</option>
+              <option value="CA">カナダ</option>
+              <option value="DE">ドイツ</option>
+              <option value="GB">英国</option>
               <option value="OTHER">その他</option>
             </select>
           </label>
-          <label>関税率（%）<input data-cost="tariffRate" type="number" min="0" max="100" step="0.1"></label>
-          <label>通関・DDP固定費（円）<input data-cost="customsFixedJpy" type="number" min="0" step="1"></label>
+          <label>仮の関税率（%）<input data-cost="tariffRate" type="number" inputmode="decimal" min="0" max="1000" step="0.1"></label>
+          <label>確認したHTSUS（10桁）<input data-cost="htsus" type="text" inputmode="decimal" maxlength="14" placeholder="分類を確認して入力"></label>
+          <label>DDP見積の関税額（円）<input data-cost="dutyQuoteJpy" type="number" inputmode="decimal" min="0" step="1" placeholder="未確認"></label>
+          <label>通関・DDP固定費（円）<input data-cost="customsFixedJpy" type="number" inputmode="decimal" min="0" step="1"></label>
           <label class="check-row"><input data-cost="supplierConfirmed" type="checkbox">仕入価格・在庫・送料を確認済み</label>
           <label class="check-row"><input data-cost="tariffConfirmed" type="checkbox">原産国・DDP関税を確認済み</label>
+          <p class="muted">DDPの関税額には送料・通関固定費を含めず、各欄に分けます。入力した見積額を仮の関税率より優先します。仕入・関税の確認は7日間有効で、金額変更後は再確認します。</p>
         </div>
 
         <p class="fee-profile-note muted"></p>
@@ -262,6 +294,7 @@
     </article>
   </template>
 
+  <script src="./persistence.js" defer></script>
   <script src="./app.js" defer></script>
 </body>
 </html>

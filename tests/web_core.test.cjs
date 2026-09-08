@@ -31,10 +31,10 @@ const {
 } = app;
 
 function resetState() {
-  state.settings = { ...DEFAULT_SETTINGS, includePayoneerAnnualFee: false };
+  state.settings = { ...DEFAULT_SETTINGS, includePayoneerAnnualFee: false, feesConfirmed: true };
   state.costs = {};
   state.apiPayload = {
-    cost_defaults: { exchange_rate: { rate: 150 } },
+    cost_defaults: { exchange_rate: { rate: 150, fallback: false, date: new Date().toISOString().slice(0, 10) } },
     products: [],
   };
   state.setupStatus = {
@@ -118,6 +118,12 @@ assert.equal(nextAction(verified, verifiedProfit), "仕入先で価格・在庫�
 state.costs[verified.part_number] = {
   supplierConfirmed: true,
   tariffConfirmed: true,
+  supplierConfirmedAt: new Date().toISOString(),
+  tariffConfirmedAt: new Date().toISOString(),
+  htsus: "8708998180",
+  dutyQuoteJpy: 2700,
+  tariffSalePriceUsd: 120,
+  tariffPolicyReview: "2026-09-08",
 };
 const confirmedProfit = calculateProfit(verified);
 assert.equal(confirmedProfit.passes, true);
