@@ -11,7 +11,7 @@ function worker(fetcher, failPut = false) {
   const context = vm.createContext({ URL, Response, Headers, AbortController, setTimeout, clearTimeout,
     importScripts: () => {}, fetch: fetcher,
     caches: { open: async () => cache, match: async () => cached.clone(),
-      keys: async () => ["part-scout-shell-v8", "part-scout-data-v1", "another-app"],
+      keys: async () => ["part-scout-shell-v9", "part-scout-data-v1", "another-app"],
       delete: async key => { deleted.push(key); return true; } },
     self: { PartScoutSWCore: require("../web/sw_core.js"),
       location: { origin: "https://example.github.io" },
@@ -33,7 +33,7 @@ test("updating the app preserves saved data and other applications' caches", asy
   let done;
   sw.handlers.activate({ waitUntil: promise => { done = promise; } });
   await done;
-  assert.deepEqual(sw.deleted, ["part-scout-shell-v8"]);
+  assert.deepEqual(sw.deleted, ["part-scout-shell-v9"]);
 });
 test("HTTP errors and disconnection return marked last-known data", async () => {
   for (const fetcher of [async () => new Response("error", { status: 503 }), async () => { throw new Error("offline"); }]) {
@@ -48,7 +48,7 @@ test("failure to cache never discards a successful network response", async () =
   assert.deepEqual(await response.json(), { fresh: true });
 });
 
-test("upgrading v8 migrates its last research data before deleting the combined cache", async () => {
+test("upgrading v9 migrates its last research data before deleting the combined cache", async () => {
   for (const scenario of ["normal", "quota", "newer"]) {
   const handlers = {}, buckets = new Map();
   const scope = "https://example.github.io/ebay-parts-bot/";
@@ -60,7 +60,7 @@ test("upgrading v8 migrates its last research data before deleting the combined 
       rows.set(String(key), val.clone());
     } };
   };
-  const old = await open("part-scout-shell-v8");
+  const old = await open("part-scout-shell-v9");
   await old.put(scope + "data/results.json", new Response('{"generated_at":"2026-09-08T00:00:00Z","products":[]}'));
   if (scenario === "newer") {
     const current = await open("part-scout-data-v1");
@@ -80,6 +80,6 @@ test("upgrading v8 migrates its last research data before deleting the combined 
   const response = await result;
   assert.equal(response.status, 200);
   assert.equal((await response.json()).generated_at, scenario === "newer" ? "2026-09-09T00:00:00Z" : "2026-09-08T00:00:00Z");
-  assert.equal(buckets.has("part-scout-shell-v8"), scenario === "quota");
+  assert.equal(buckets.has("part-scout-shell-v9"), scenario === "quota");
   }
 });

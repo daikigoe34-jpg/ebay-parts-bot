@@ -2,6 +2,8 @@
 
 const Persistence = typeof PartScoutPersistence !== "undefined"
   ? PartScoutPersistence : require("./persistence.js");
+const Shipping = typeof PartScoutShipping !== "undefined"
+  ? PartScoutShipping : require("./shipping.js");
 const localStore = Persistence.createStore((() => {
   try { return typeof localStorage !== "undefined" ? localStorage : null; } catch (_) { return null; }
 })());
@@ -275,6 +277,7 @@ function number(value, fallback = 0) {
 }
 
 function yen(value) {
+  if (typeof value === "boolean" || value == null || String(value).trim() === "") return "未確定";
   return Number.isFinite(Number(value)) ? `${Math.round(Number(value)).toLocaleString("ja-JP")}円` : "未確定";
 }
 
@@ -533,6 +536,13 @@ function productDefaults(product) {
     internationalShippingJpy: number(auto.international_shipping_jpy, state.settings.defaultInternationalShippingJpy),
     packagingJpy: number(auto.packaging_jpy, state.settings.defaultPackagingJpy),
     customsFixedJpy: 0,
+    speedpakOtherCustomsJpy: 0,
+    shippingMethod: "manual",
+    parcelWeightKg: "",
+    parcelLengthCm: "",
+    parcelWidthCm: "",
+    parcelHeightCm: "",
+    shippingRegion: "US48",
     originCode: String(product.country_of_origin || ""),
     tariffRate,
     htsus: "",
@@ -544,7 +554,20 @@ function productDefaults(product) {
 
 function getCostValues(product) {
   const values = { ...productDefaults(product), ...(state.costs[product.part_number] || {}) };
+  values.shippingMethod = values.shippingMethod === "speedpak_economy_us" ? "speedpak_economy_us" : "manual";
+  values.shippingQuote = values.shippingMethod === "speedpak_economy_us"
+    ? Shipping.estimateEconomy({
+      weightKg: values.parcelWeightKg,
+      lengthCm: values.parcelLengthCm,
+      widthCm: values.parcelWidthCm,
+      heightCm: values.parcelHeightCm,
+      region: values.shippingRegion,
+      declaredValueUsd: values.salePriceUsd,
+    })
+    : null;
+  if (values.shippingQuote) values.internationalShippingJpy = values.shippingQuote.ok ? values.shippingQuote.shippingJpy : null;
   values.supplierConfirmed = values.supplierConfirmed === true && recentConfirmation(values.supplierConfirmedAt);
+  if (values.shippingMethod === "speedpak_economy_us") values.supplierConfirmed = false;
   values.tariffConfirmed = values.tariffConfirmed === true && recentConfirmation(values.tariffConfirmedAt)
     && values.tariffPolicyReview === TARIFF_POLICY_REVIEW
     && number(values.tariffSalePriceUsd, -1) === number(values.salePriceUsd, -2);
@@ -570,7 +593,8 @@ function confirmedExchangeRate() {
 
 function costInputErrors(values) {
   const errors = [];
-  for (const key of ["salePriceUsd", "buyerShippingUsd", "procurementJpy", "domesticShippingJpy", "internationalShippingJpy", "packagingJpy", "customsFixedJpy", "tariffRate"]) {
+  const customsKey = values.shippingMethod === "speedpak_economy_us" ? "speedpakOtherCustomsJpy" : "customsFixedJpy";
+  for (const key of ["salePriceUsd", "buyerShippingUsd", "procurementJpy", "domesticShippingJpy", "internationalShippingJpy", "packagingJpy", customsKey, "tariffRate"]) {
     if (!validNumber(values[key], 0, key === "tariffRate" ? 1000 : 1e9)) errors.push(key);
   }
   if (values.dutyQuoteJpy !== "" && !validNumber(values.dutyQuoteJpy)) errors.push("dutyQuoteJpy");
@@ -585,10 +609,13 @@ function costInputErrors(values) {
 function updateCostValue(product, key, value) {
   const previous = getCostValues(product);
   const next = { ...(state.costs[product.part_number] || {}), [key]: value };
-  if (["supplierConfirmed", "tariffConfirmed"].includes(key) && value === true) {
+  const shippingFields = ["shippingMethod", "parcelWeightKg", "parcelLengthCm", "parcelWidthCm", "parcelHeightCm", "shippingRegion"];
+  if (key === "supplierConfirmed" && value === true && previous.shippingMethod === "speedpak_economy_us") {
+    next.supplierConfirmed = false;
+  } else if (["supplierConfirmed", "tariffConfirmed"].includes(key) && value === true) {
     const fields = key === "supplierConfirmed"
       ? ["procurementJpy", "domesticShippingJpy", "internationalShippingJpy", "packagingJpy"]
-      : ["originCode", "htsus", "dutyQuoteJpy", "customsFixedJpy"];
+      : ["originCode", "htsus", "dutyQuoteJpy", previous.shippingMethod === "speedpak_economy_us" ? "speedpakOtherCustomsJpy" : "customsFixedJpy"];
     for (const field of fields) next[field] = previous[field];
     next[`${key}At`] = new Date().toISOString();
     if (key === "tariffConfirmed") {
@@ -597,7 +624,9 @@ function updateCostValue(product, key, value) {
     }
   } else if (String(previous[key]) !== String(value)) {
     if (["procurementJpy", "domesticShippingJpy", "internationalShippingJpy", "packagingJpy"].includes(key)) next.supplierConfirmed = false;
-    if (["salePriceUsd", "originCode", "tariffRate", "htsus", "dutyQuoteJpy", "customsFixedJpy"].includes(key)) next.tariffConfirmed = false;
+    if (["salePriceUsd", "originCode", "tariffRate", "htsus", "dutyQuoteJpy", "customsFixedJpy", "speedpakOtherCustomsJpy"].includes(key)) next.tariffConfirmed = false;
+    if (shippingFields.includes(key)) { next.supplierConfirmed = false; next.tariffConfirmed = false; }
+    if (key === "salePriceUsd" && previous.shippingMethod === "speedpak_economy_us") next.supplierConfirmed = false;
     if (key === "originCode") { next.tariffRate = tariffScenario(value).rate; next.dutyQuoteJpy = ""; next.htsus = ""; }
   }
   state.costs[product.part_number] = next;
@@ -646,11 +675,18 @@ function calculateProfit(product) {
   const tariffRate = Math.max(0, number(values.tariffRate, tariffScenario(values.originCode).rate));
   const tariff = validNumber(values.dutyQuoteJpy) ? Number(values.dutyQuoteJpy) : salePriceUsd * exchangeRate * tariffRate / 100;
   const returnReserve = grossJpy * number(state.settings.returnReserveRate) / 100;
+  const speedpakFees = values.shippingMethod === "speedpak_economy_us" && values.shippingQuote?.ok
+    ? values.shippingQuote.clearanceJpy + tariff * values.shippingQuote.dutyProcessingRate
+    : 0;
+  const customsCost = values.shippingMethod === "speedpak_economy_us"
+    ? number(values.speedpakOtherCustomsJpy)
+    : number(values.customsFixedJpy);
   const fixedCosts = number(values.procurementJpy)
     + number(values.domesticShippingJpy)
     + number(values.internationalShippingJpy)
     + number(values.packagingJpy)
-    + number(values.customsFixedJpy);
+    + customsCost
+    + speedpakFees;
   const totalCost = inputErrors.length ? NaN : ebayFee + payoneerFee + tariff + returnReserve + fixedCosts;
   const profit = grossJpy - totalCost;
   const margin = inputErrors.length ? NaN : grossJpy > 0 ? profit / grossJpy : 0;
@@ -699,6 +735,7 @@ function calculateProfit(product) {
     feeProfile: profile, internationalRate, perOrderFeeUsd, finalValueFeeJpy,
     internationalFeeJpy, promotedFeeJpy, insertionFeeJpy, ebayFeeTaxJpy, ebayFee,
     payoneerFee, payoneerAnnualAllocation, annualFeeApplicable, tariffRate, tariff,
+    speedpakFees, shippingQuote: values.shippingQuote,
     returnReserve, totalCost, profit, margin, hasProcurement, hasShipping, hasCosts,
     salesVerified, decisionSold, operationalFailed, confirmationFailed, passes,
     provisional, judgment,
@@ -743,6 +780,9 @@ function nextAction(product, profit = calculateProfit(product), setupStatus = st
   if (profit.operationalFailed.length) return `${profit.operationalFailed[0]}が基準未達。次候補へ進む`;
   if (profit.confirmationFailed.includes("為替")) return "為替が未取得です。設定で確認してください";
   if (profit.confirmationFailed.includes("手数料設定")) return "設定でPayoneerなどの実料率を確認";
+  if (profit.values.shippingMethod === "speedpak_economy_us" && profit.confirmationFailed.includes("仕入条件")) {
+    return "CPaSS見積の送料に切替（手入力）して確認";
+  }
   if (profit.confirmationFailed.includes("仕入条件")) return "仕入先で価格・在庫・送料を確認";
   if (profit.confirmationFailed.includes("原産国・関税")) return "原産国・HTSUS・DDP関税額を確認";
   if (profit.passes) return "購入候補。仕入判断へ進む";
@@ -1130,6 +1170,27 @@ function applyCostValuesToControls(controls, values, active = typeof document !=
     } else {
       control.value = values?.[key] ?? "";
     }
+    if (key === "internationalShippingJpy") control.readOnly = values?.shippingMethod === "speedpak_economy_us";
+    if (key === "supplierConfirmed") control.disabled = values?.shippingMethod === "speedpak_economy_us";
+  }
+}
+
+function updateShippingReference(card, values) {
+  const autoMode = values.shippingMethod === "speedpak_economy_us";
+  card.querySelectorAll("[data-shipping-auto]").forEach((element) => { element.hidden = !autoMode; });
+  card.querySelectorAll("[data-shipping-manual]").forEach((element) => { element.hidden = autoMode; });
+  const reference = card.querySelector(".shipping-reference");
+  if (reference) {
+    reference.hidden = !autoMode;
+    if (autoMode) {
+      const quote = values.shippingQuote;
+      reference.querySelector(".shipping-reference-summary").textContent = quote?.ok
+        ? `参考送料 ${yen(quote.shippingJpy)}（基本 ${yen(quote.baseJpy)}／サイズ加算 ${yen(quote.oversizeJpy)}）`
+        : "参考送料 未確定";
+      reference.querySelector(".shipping-reference-weight").textContent = quote?.ok
+        ? `課金重量 ${quote.chargeableWeightKg.toFixed(3)} kg／料金区分 ${quote.billedWeightKg} kgまで`
+        : (quote?.errors || []).join(" ");
+    }
   }
 }
 
@@ -1152,6 +1213,7 @@ function updateProfitArea(card, product) {
   const profit = calculateProfit(product);
   const values = profit.values;
   const originCode = String(values.originCode || product.country_of_origin || "");
+  updateShippingReference(card, values);
   card.querySelector(".profit-value-main").textContent = profit.salesVerified && profit.hasCosts ? yen(profit.profit) : "未確定";
   card.querySelector(".procurement-value").textContent = number(values.procurementJpy) > 0 ? yen(values.procurementJpy) : "未取得";
   card.querySelector(".shipping-value").textContent = yen(values.internationalShippingJpy);

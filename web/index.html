@@ -251,8 +251,31 @@
           <label>購入者負担送料（USD）<input data-cost="buyerShippingUsd" type="number" inputmode="decimal" min="0" step="0.01"></label>
           <label>仕入価格（円）<input data-cost="procurementJpy" type="number" inputmode="decimal" min="0" step="1"></label>
           <label>国内送料（円）<input data-cost="domesticShippingJpy" type="number" inputmode="decimal" min="0" step="1"></label>
+          <label class="shipping-method-field">送料の計算方法
+            <select data-cost="shippingMethod">
+              <option value="manual">手入力</option>
+              <option value="speedpak_economy_us">SpeedPAK Economy（米国）</option>
+            </select>
+          </label>
+          <label data-shipping-auto hidden>実重量（kg）<input data-cost="parcelWeightKg" type="number" inputmode="decimal" min="0" step="0.001" placeholder="例 0.5"></label>
+          <label data-shipping-auto hidden>箱の長さ（cm）<input data-cost="parcelLengthCm" type="number" inputmode="decimal" min="0" step="0.01" placeholder="例 20"></label>
+          <label data-shipping-auto hidden>箱の幅（cm）<input data-cost="parcelWidthCm" type="number" inputmode="decimal" min="0" step="0.01" placeholder="例 15"></label>
+          <label data-shipping-auto hidden>箱の高さ（cm）<input data-cost="parcelHeightCm" type="number" inputmode="decimal" min="0" step="0.01" placeholder="例 10"></label>
+          <label class="shipping-region-field" data-shipping-auto hidden>配送地域
+            <select data-cost="shippingRegion">
+              <option value="US48">米国本土48州を想定</option>
+              <option value="OTHER">その他（CPaSS／手入力で確認）</option>
+            </select>
+          </label>
           <label>国際送料（円）<input data-cost="internationalShippingJpy" type="number" inputmode="decimal" min="0" step="1"></label>
           <label>梱包費（円）<input data-cost="packagingJpy" type="number" inputmode="decimal" min="0" step="1"></label>
+          <section class="shipping-reference" hidden>
+            <strong class="shipping-reference-summary">参考送料 未確定</strong>
+            <p class="shipping-reference-weight"></p>
+            <p>2026年3月25日発効の料金表による参考送料です。燃油込み。通関245円と関税処理手数料（関税額の2.1%）は送料に含めず、総コストへ各1回加算します。</p>
+            <p><a href="https://static.orangeconnex.com/capricorn/selfQuery/1141130239112384512.pdf" target="_blank" rel="noopener noreferrer">Orange Connex料金表</a> ／ 参考送料・最終金額はCPaSSで確認</p>
+            <p class="shipping-warning">危険物・バッテリーは受け付け対象外です。</p>
+          </section>
           <label>原産国
             <select data-cost="originCode">
               <option value="">不明</option>
@@ -272,7 +295,8 @@
           <label>仮の関税率（%）<input data-cost="tariffRate" type="number" inputmode="decimal" min="0" max="1000" step="0.1"></label>
           <label>確認したHTSUS（10桁）<input data-cost="htsus" type="text" inputmode="decimal" maxlength="14" placeholder="分類を確認して入力"></label>
           <label>DDP見積の関税額（円）<input data-cost="dutyQuoteJpy" type="number" inputmode="decimal" min="0" step="1" placeholder="未確認"></label>
-          <label>通関・DDP固定費（円）<input data-cost="customsFixedJpy" type="number" inputmode="decimal" min="0" step="1"></label>
+          <label data-shipping-manual>通関・DDP固定費（円）<input data-cost="customsFixedJpy" type="number" inputmode="decimal" min="0" step="1"></label>
+          <label data-shipping-auto hidden>その他の通関費（円）<input data-cost="speedpakOtherCustomsJpy" type="number" inputmode="decimal" min="0" step="1"></label>
           <label class="check-row"><input data-cost="supplierConfirmed" type="checkbox">仕入価格・在庫・送料を確認済み</label>
           <label class="check-row"><input data-cost="tariffConfirmed" type="checkbox">原産国・DDP関税を確認済み</label>
           <p class="muted">DDPの関税額には送料・通関固定費を含めず、各欄に分けます。入力した見積額を仮の関税率より優先します。仕入・関税の確認は7日間有効で、金額変更後は再確認します。</p>
@@ -295,6 +319,7 @@
   </template>
 
   <script src="./persistence.js" defer></script>
+  <script src="./shipping.js" defer></script>
   <script src="./app.js" defer></script>
 </body>
 </html>
