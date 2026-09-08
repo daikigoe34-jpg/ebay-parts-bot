@@ -122,9 +122,18 @@
     const message=container.querySelector('[data-queue-message]');let sync;
     const queue=createQueue({storage,onChange:()=>sync?.changed(),onError:text=>message.textContent=text});
     if(options.adapter)queue.reconnectEditor(options.adapter.capture());
-    let requestedId=null;
+    let requestedId=null,requestedUserRevision;
+    function cancelRequested() { requestedId=null; }
+    container.addEventListener("input",cancelRequested);
+    container.addEventListener("change",cancelRequested);
     function processRequested() {
-      if(!requestedId || !options.adapter || !queue.snapshot().items.some(x=>x.id===requestedId))return;
+      if(!requestedId || !options.adapter)return;
+      if(options.adapter.getUserRevision?.()!==requestedUserRevision || options.adapter.canResumeRequested?.()===false) {
+        cancelRequested();
+        message.textContent="入力中、または作業が変わったため自動再開を中止しました。続ける項目の「送料見積を再開」を押してください。";
+        return;
+      }
+      if(!queue.snapshot().items.some(x=>x.id===requestedId))return;
       const id=requestedId;requestedId=null;
       perform(()=>queue.resume(id,options.adapter));render();
     }
@@ -138,7 +147,7 @@
         const label=document.createElement('label');label.textContent='進捗';const select=document.createElement('select');select.setAttribute('aria-label',`${item.partNumber}の進捗`);for(const [value,text]of Object.entries(statuses)){const o=document.createElement('option');o.value=value;o.textContent=text;select.append(o);}select.value=item.status;label.append(select);row.append(label);select.onchange=()=>perform(()=>queue.update(item.id,{status:select.value}));
         const noteLabel=document.createElement('label');noteLabel.textContent='残りの確認・メモ';const note=document.createElement('textarea');note.maxLength=2000;note.value=item.note;note.setAttribute('aria-label',`${item.partNumber}のメモ`);noteLabel.append(note);row.append(noteLabel);note.oninput=()=>perform(()=>queue.update(item.id,{note:note.value}));
         const actions=document.createElement('div');actions.className='workspace-actions';row.append(actions);
-        const resume=document.createElement('button');resume.type='button';resume.textContent='送料見積を再開';resume.onclick=()=>{if(perform(()=>queue.resume(item.id,options.adapter))){render();if(!options.adapter)root.location.href='./shipping-calculator.html?research='+encodeURIComponent(item.id);}};actions.append(resume);
+        const resume=document.createElement('button');resume.type='button';resume.textContent='送料見積を再開';resume.onclick=()=>{cancelRequested();if(perform(()=>queue.resume(item.id,options.adapter))){render();if(!options.adapter)root.location.href='./shipping-calculator.html?research='+encodeURIComponent(item.id);}};actions.append(resume);
         const remove=document.createElement('button');remove.type='button';remove.textContent='項目を削除';remove.onclick=()=>{if(root.confirm('この調査項目と保存見積を削除しますか？必要な場合は先にバックアップしてください。')&&perform(()=>queue.remove(item.id)))render();};actions.append(remove);
       }
     }
@@ -146,7 +155,7 @@
     container.querySelector('[data-queue-add]').onsubmit=event=>{event.preventDefault();const form=event.currentTarget;if(perform(()=>queue.add(form.elements.manufacturer.value,form.elements.partNumber.value))){form.elements.partNumber.value='';render();}};
     container.querySelector('[data-queue-handoff]').onclick=async()=>{const text=queue.handoff(root.location.href);const area=container.querySelector('[data-handoff]');area.value=text;container.querySelector('[data-handoff-label]').hidden=false;area.focus();area.select();try{await root.navigator.clipboard.writeText(text);message.textContent='引き継ぎ文をコピーしました。';}catch(_){message.textContent='表示した文をコピーしてWorkへ貼り付けてください。';}};
     const fileInput=container.querySelector('[data-queue-file]');let importGeneration=0;
-    container.querySelector('[data-queue-import]').onclick=()=>fileInput.click();
+    container.querySelector('[data-queue-import]').onclick=()=>{cancelRequested();fileInput.click();};
     fileInput.onchange=async()=>{
       const file=fileInput.files?.[0];if(!file)return;
       const generation=++importGeneration, before=JSON.stringify(queue.snapshot());
@@ -162,7 +171,7 @@
       }catch(error){message.textContent=error.message||"復元できませんでした。";}finally{if(generation===importGeneration)fileInput.value="";}
     };
     render();sync.start();
-    return {queue,sync,detachEditor:queue.detachEditor,capture:draft=>perform(()=>queue.capture(draft)),resumeRequested(id){requestedId=id;processRequested();}};
+    return {queue,sync,detachEditor:queue.detachEditor,capture:draft=>perform(()=>queue.capture(draft)),resumeRequested(id){requestedId=id;requestedUserRevision=options.adapter?.getUserRevision?.();processRequested();}};
   }
   root.PartScoutQueue={key,statuses,validate,validateDraft,createQueue,mount};
   if(typeof module!=="undefined"&&module.exports)module.exports=root.PartScoutQueue;

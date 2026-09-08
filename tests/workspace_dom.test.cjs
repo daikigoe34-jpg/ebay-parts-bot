@@ -68,3 +68,25 @@ test('shipping cloud receive cannot replace a different durable domain value eve
 test('shipping backup import detaches the previous task before further parcel edits',async()=>{
   const queue=queueFixture(),dom=open(seedDocuments(queue,queue.items[0].draft)),w=dom.window;const file=w.document.querySelector('#calc-file');Object.defineProperty(file,'files',{value:[{size:100,text:async()=>JSON.stringify({format:shippingKey,data:draft('90915-10002','6')})}]});file.dispatchEvent(new w.Event('change'));await tick();input(w,'[name=weightKg]','5');const saved=JSON.parse(w.localStorage.getItem(queueKey));assert.equal(saved.items[0].draft.weightKg,'1');assert.equal(saved.items[1].draft.weightKg,'9');dom.window.close();
 });
+for(const mode of ['typing','typing then leaving','focusing'])test(`deferred URL resume cancels permanently after ${mode} a shipping field`,async()=>{
+  const typed=mode!=='focusing',blurBefore=mode==='typing then leaving';
+  const queue=queueFixture();let release,delivered=false;
+  const dom=open({},async url=>url.endsWith('/queue')?(delivered?responseDoc(queue):new Promise(resolve=>{release=()=>{delivered=true;resolve(responseDoc(queue));};})):{status:200,json:async()=>({schemaVersion:1,userKey:'alice',revision:0,data:null,updatedAt:null})},{url:'https://live.test/shipping-calculator.html?research='+encodeURIComponent(queue.items[1].id)}),w=dom.window;
+  try {
+    await tick();const weight=w.document.querySelector('[name=weightKg]');weight.focus();if(typed)input(w,'[name=weightKg]','12.');if(blurBefore)weight.blur();
+    release();await tick();await tick();if(!blurBefore)assert.equal(w.document.activeElement,weight);assert.equal(weight.value,typed?'12.':'');
+    assert.match(w.document.querySelector('[data-queue-message]').textContent,/自動再開を中止/);
+    weight.blur();w.document.querySelector('[data-queue-sync] [data-sync-now]').click();await tick();await tick();assert.equal(weight.value,typed?'12.':'');
+    assert.equal(JSON.parse(w.localStorage.getItem(queueKey)).items[1].draft.weightKg,'9');
+  }finally{dom.window.close();}
+});
+test('a newer explicit resume cancels the older pending URL choice even after queue conflict resolution',async()=>{
+  const incoming=queueFixture(),initial={...incoming,items:[incoming.items[0]]};let release;
+  const dom=open(seedDocuments(initial,initial.items[0].draft),async url=>url.endsWith('/queue')?new Promise(resolve=>release=()=>resolve(responseDoc(incoming,2))):{status:404,json:async()=>({})},{url:'https://live.test/shipping-calculator.html?research='+encodeURIComponent(incoming.items[1].id)}),w=dom.window;
+  try {
+    w.document.querySelector('.research-item button').click();assert.equal(w.document.querySelector('[name=weightKg]').value,'1');
+    release();await tick();w.document.querySelector('[data-queue-sync] [data-sync-remote]').click();await tick();await tick();
+    assert.equal(w.document.querySelectorAll('.research-item').length,2);assert.equal(w.document.querySelector('[name=weightKg]').value,'1');
+    input(w,'[name=weightKg]','2');const saved=JSON.parse(w.localStorage.getItem(queueKey));assert.equal(saved.items[0].draft.weightKg,'2');assert.equal(saved.items[1].draft.weightKg,'9');
+  }finally{dom.window.close();}
+});

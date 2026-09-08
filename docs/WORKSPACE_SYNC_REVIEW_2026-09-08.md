@@ -18,3 +18,5 @@ Cross-device synchronization requires the Sites URL and the same authenticated u
 Actual iPhone/PC browser use, connected Work computer operation, seller OAuth and real CPaSS transactions were not tested in this change. Signing in and granting the relevant computer/browser access remain necessary. Shipment measurements, packing and handover remain physical work.
 
 The final review reproduced two client data-loss interleavings; both were fixed before publication. Scoped review and exact-branch CI results are recorded with the pull request. Stale tabs deliberately stop for backup/reload; estimates displaced by explicit resume are retained in exportable recovery when they have no associated task.
+
+Final callback correction: the configured workspace suite passes 48 tests, including four RED-to-GREEN delayed-resume cases (focused typing, typing then blur, focus only, and newer explicit resume). Delayed links cancel after newer user intent; untouched initial receive orders still resume. Native build and the 20 built tests plus hosted smoke pass on the integrated source.

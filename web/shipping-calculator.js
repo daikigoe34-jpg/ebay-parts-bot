@@ -11,6 +11,8 @@
   let workspaceSync;
   let researchQueue;
   let editRevision = 0;
+  // Initial cloud hydration is not a newer user choice.
+  let userActionRevision = 0;
   let importGeneration = 0;
   const controls = [...form.elements].filter(x => x.name);
   const fields = new Set(controls.map(x => x.name));
@@ -55,10 +57,10 @@
   // Capture lookup edits/actions before their handlers, including measured saves.
   const lookupSection = document.querySelector("#part-lookup");
   for (const eventName of ["input", "change", "click"]) lookupSection.addEventListener(eventName, event => {
-    if (event.target.matches(eventName === "click" ? "button" : "[data-lookup-field]")) editRevision++;
+    if (event.target.matches(eventName === "click" ? "button" : "[data-lookup-field]")) { editRevision++; userActionRevision++; }
   }, true);
   form.addEventListener("submit", event => event.preventDefault());
-  function edited(event) { editRevision++; if (["region", "declaredValueUsd"].includes(event.target.name)) lookup.contextChanged(); else lookup.manualEdit(); save(); }
+  function edited(event) { editRevision++; userActionRevision++; if (["region", "declaredValueUsd"].includes(event.target.name)) lookup.contextChanged(); else lookup.manualEdit(); save(); }
   form.addEventListener("input", edited);
   form.addEventListener("change", edited);
   document.querySelector("#calc-export").addEventListener("click", () => {
@@ -72,6 +74,7 @@
   const fileInput = document.querySelector("#calc-file");
   document.querySelector("#calc-import").addEventListener("click", () => fileInput.click());
   fileInput.addEventListener("change", async () => {
+    userActionRevision++;
     PartScoutLookup.invalidateAll();
     const revision = editRevision;
     const generation = ++importGeneration;
@@ -120,6 +123,8 @@
   if (typeof PartScoutQueue !== "undefined") {
     researchQueue = PartScoutQueue.mount(document.querySelector("#research-queue"), {adapter:{
       capture:snapshot,
+      getUserRevision:()=>userActionRevision,
+      canResumeRequested:()=>!document.activeElement?.matches("input,textarea,select"),
       preserveDetached:(current,next)=>store.read(key,null)===null || store.retain(key,current,next).ok,
       apply:value=>{if(!applyDraft(value))return false;workspaceSync?.changed();return true;},
       fresh:item=>({region:"US48",weightKg:"",declaredValueUsd:"",lengthCm:"",widthCm:"",heightCm:"",
