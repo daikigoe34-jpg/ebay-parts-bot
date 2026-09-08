@@ -6,7 +6,7 @@ const Shipping = typeof PartScoutShipping !== "undefined"
   ? PartScoutShipping : require("./shipping.js");
 const localStore = Persistence.createStore((() => {
   try { return typeof localStorage !== "undefined" ? localStorage : null; } catch (_) { return null; }
-})());
+})(), {guardedKeys:["part-scout-user-v1"]});
 const Lookup = typeof PartScoutLookup !== "undefined" ? PartScoutLookup : null;
 const lookupControllers = new Set();
 const cardLookups = new WeakMap();
@@ -236,7 +236,7 @@ function persistUserData() {
   userEditRevision++;
   const result = saveJson(USER_DATA_KEY, userDataSnapshot());
   if (result.ok) { lastUserSnapshot = stable; workspaceSync?.changed(); }
-  showSaveStatus(result.ok);
+  showSaveStatus(result.ok, result.conflict ? "別のタブで編集が保存されました。両方をバックアップして再読み込みしてください。" : undefined);
   return result.ok;
 }
 
@@ -1558,7 +1558,7 @@ if (typeof document !== "undefined") {
   if (typeof PartScoutSync !== "undefined") {
     let storage; try { storage = localStorage; } catch (_) {}
     workspaceSync = PartScoutSync.mountStatus(document.querySelector("#main-sync"), {
-      namespace:"main",storage,getLocal:syncSnapshot,
+      namespace:"main",storage,getLocal:syncSnapshot,backupExtras:()=>({tabConflicts:localStore.conflicts(USER_DATA_KEY)}),
       hasLocal:()=>loadJson(USER_DATA_KEY,null)!==null || Object.values(STORAGE_KEYS).flat().some(key=>loadJson(key,null)!==null),
       validate:value=>{ const {savedAt,...data} = validateUserData(value); return data; },
       canApply:()=>!document.activeElement?.matches("input, textarea, select"),

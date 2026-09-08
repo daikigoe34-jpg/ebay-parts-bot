@@ -5,7 +5,7 @@
   const status = document.querySelector("#calc-save");
   let storage;
   try { storage = localStorage; } catch (_) { storage = null; }
-  const store = PartScoutPersistence.createStore(storage);
+  const store = PartScoutPersistence.createStore(storage,{guardedKeys:[key]});
   let partLookup = PartScoutLookup.emptyState();
   let lookup;
   let workspaceSync;
@@ -34,7 +34,7 @@
   }
   function save() {
     const result = store.write(key, snapshot());
-    status.textContent = result.ok ? "保存済み。この端末・ブラウザで続きから再開できます。" : "端末に保存できません。この見積をバックアップしてください。";
+    status.textContent = result.conflict ? "別のタブで見積が保存されました。両方をバックアップして再読み込みしてください。" : result.ok ? "保存済み。この端末・ブラウザで続きから再開できます。" : "端末に保存できません。この見積をバックアップしてください。";
     if (result.ok) { workspaceSync?.changed(); researchQueue?.capture(snapshot()); }
     render();
     return result.ok;
@@ -87,8 +87,9 @@
       if (revision !== editRevision) throw new Error("入力が変更されたため復元を中止しました。");
       PartScoutLookup.invalidateAll();
       if (!store.write(key, value.data).ok) throw new Error("保存できないため、復元を中止しました。");
+      researchQueue?.detachEditor();
       restore(value.data); mountLookup(); render();
-      workspaceSync?.changed(); researchQueue?.capture(snapshot());
+      workspaceSync?.changed();
       status.textContent = "見積を復元しました。";
     } catch (error) { if (generation === importGeneration) status.textContent = error.message || "復元できませんでした。"; }
     finally { if (generation === importGeneration) fileInput.value = ""; }
@@ -101,6 +102,7 @@
   function applyDraft(value) {
     value = validateSyncedDraft(value);
     if (!store.write(key, value).ok) return false;
+    researchQueue?.detachEditor();
     editRevision++; importGeneration++;
     PartScoutLookup.invalidateAll();
     restore(value); mountLookup(); render();
@@ -108,7 +110,7 @@
   }
   if (typeof PartScoutSync !== "undefined") {
     workspaceSync = PartScoutSync.mountStatus(document.querySelector("#shipping-sync"), {
-      namespace:"shipping",storage,getLocal:snapshot,hasLocal:()=>store.read(key,null)!==null,
+      namespace:"shipping",storage,getLocal:snapshot,backupExtras:()=>({tabConflicts:store.conflicts(key)}),hasLocal:()=>store.read(key,null)!==null,
       validate:validateSyncedDraft,
       canApply:()=>!document.activeElement?.matches("#parcel-form input, #parcel-form select, #part-lookup input, #part-lookup select"),
       applyRemote:applyDraft,
@@ -118,6 +120,7 @@
   if (typeof PartScoutQueue !== "undefined") {
     researchQueue = PartScoutQueue.mount(document.querySelector("#research-queue"), {adapter:{
       capture:snapshot,
+      preserveDetached:(current,next)=>store.read(key,null)===null || store.retain(key,current,next).ok,
       apply:value=>{if(!applyDraft(value))return false;workspaceSync?.changed();return true;},
       fresh:item=>({region:"US48",weightKg:"",declaredValueUsd:"",lengthCm:"",widthCm:"",heightCm:"",
         partLookup:{...PartScoutLookup.emptyState(),make:item.manufacturer,forms:{standalone:{make:item.manufacturer,part:item.partNumber}}}}),

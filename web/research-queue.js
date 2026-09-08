@@ -38,6 +38,7 @@
     let data = {version:1,items:[],activeId:null};
     let loadError = false;
     let lastRaw = null;
+    let editorOwnerId = null;
     try { const raw = options.storage?.getItem(key); lastRaw=raw; if (raw) data = validate(JSON.parse(raw)); }
     catch (_) { loadError = true; options.onError?.("保存した調査リストを読み込めません。バックアップを確認してください。"); }
     function commit(next,notify=true) {
@@ -67,13 +68,44 @@
       commit({...data,items:[...data.items,item]});return clone(item);
     }
     function update(id,patch) {const next=clone(data),item=next.items.find(x=>x.id===id);if(!item)throw Error("項目がありません。");for(const field of ["status","note"])if(Object.hasOwn(patch,field))item[field]=patch[field];commit(next);}
-    function capture(draft) {if(!data.activeId)return true;const next=clone(data);next.items.find(x=>x.id===next.activeId).draft=validateDraft(draft);return commit(next);}
+    function detachEditor() { editorOwnerId = null; }
+    function draftIdentity(draft) {
+      const form=draft?.partLookup?.forms?.standalone;
+      try { return form ? identity(form.make,form.part).id : null; } catch (_) { return null; }
+    }
+    function capture(draft) {
+      if (!editorOwnerId) return true;
+      if (draft.partLookup && draftIdentity(draft)!==editorOwnerId) { detachEditor(); return true; }
+      const next=clone(data),owner=next.items.find(x=>x.id===editorOwnerId);
+      if(!owner){detachEditor();return true;}
+      owner.draft=validateDraft(draft);return commit(next);
+    }
+    function replace(next,notify) {
+      const oldOwner=data.items.find(x=>x.id===editorOwnerId);
+      const newOwner=next.items.find(x=>x.id===editorOwnerId);
+      const keepOwner=!notify && oldOwner && newOwner && Sync.equal(oldOwner.draft,newOwner.draft);
+      commit(next,notify);
+      if(!keepOwner)detachEditor();
+      return true;
+    }
+    function reconnectEditor(draft) {
+      const id=draftIdentity(draft),item=data.items.find(x=>x.id===id);
+      // Reopening never trusts synchronized work position alone.
+      if(item?.draft && Sync.equal(validateDraft(item.draft),validateDraft(draft)))editorOwnerId=id;
+    }
     function resume(id,adapter) {
       const next=clone(data),target=next.items.find(x=>x.id===id);if(!target)throw Error("項目がありません。");
-      if(next.activeId && adapter)next.items.find(x=>x.id===next.activeId).draft=validateDraft(adapter.capture());
+      if(editorOwnerId && adapter) {
+        const current=adapter.capture(),owner=next.items.find(x=>x.id===editorOwnerId);
+        if(owner && (!current.partLookup || draftIdentity(current)===editorOwnerId))owner.draft=validateDraft(current);
+        else detachEditor();
+      }
       const draft=adapter ? validateDraft(target.draft || adapter.fresh(target)) : null;
-      const previous=clone(data);next.activeId=id;commit(next);
+      if(adapter && !editorOwnerId && !Sync.equal(adapter.capture(),draft)
+          && adapter.preserveDetached?.(adapter.capture(),draft)===false)throw Error("前の見積を保護できないため、切り替えを中止しました。バックアップを保存してください。");
+      const previous=clone(data);next.activeId=id;if(adapter)target.draft=draft;commit(next);
       if(adapter)try {if(adapter.apply(draft)===false)throw Error("見積を保存できません。");}catch(error){commit(previous);throw error;}
+      if(adapter)editorOwnerId=id;
       return clone(target);
     }
     function handoff(href) {
@@ -81,7 +113,7 @@
       const pending=data.items.filter(x=>x.status!=="complete");
       return `Part Scoutの続きです。現在のページ：${url.href}\n${pending.map(x=>`${x.manufacturer} ${x.partNumber}［${statuses[x.status]}］ 未確認：${x.note || "重量・梱包寸法、適合、仕入価格・在庫・送料、原産国・関税を確認"}`).join("\n") || "未完了の項目はありません。"}\n保存した調査リストから送料見積を再開してください。取得は明示操作のみ。進捗は手動の記録で、購入・出品の承認ではありません。`;
     }
-    return {add,update,resume,capture,handoff,backupExtras:()=>({tabConflicts:JSON.parse(options.storage?.getItem(`${key}:tab-conflicts`)||"[]")}),snapshot:()=>clone(data),restore:next=>commit(next),applyRemote:next=>commit(next,false),remove(id){commit({...data,items:data.items.filter(x=>x.id!==id),activeId:data.activeId===id?null:data.activeId});}};
+    return {add,update,resume,capture,handoff,detachEditor,reconnectEditor,backupExtras:()=>({tabConflicts:JSON.parse(options.storage?.getItem(`${key}:tab-conflicts`)||"[]")}),snapshot:()=>clone(data),restore:next=>replace(next,true),applyRemote:next=>replace(next,false),remove(id){commit({...data,items:data.items.filter(x=>x.id!==id),activeId:data.activeId===id?null:data.activeId});}};
   }
   function mount(container,options={}) {
     if(!container)return null;
@@ -89,6 +121,13 @@
     container.innerHTML='<h2>続きから調査</h2><p>eBay未接続でも保存できます。進捗は自分で記録します（購入・出品の承認ではありません）。</p><form data-queue-add class="workspace-actions"><label>メーカー<select name="manufacturer"><option>TOYOTA</option><option>NISSAN</option><option>HONDA</option><option>SUBARU</option></select></label><label>正確な品番<input name="partNumber" maxlength="40" required placeholder="90915-10001"></label><button type="submit">調査に追加</button></form><p data-queue-message role="status"></p><div data-queue-sync></div><div data-queue-items></div><div class="workspace-actions"><button type="button" data-queue-import>調査リストを復元</button><input type="file" data-queue-file accept=".json,application/json" hidden></div><button type="button" data-queue-handoff>Workへの引き継ぎ文を作る</button><label data-handoff-label hidden>コピーしてWorkへ貼り付け<textarea data-handoff readonly rows="7"></textarea></label>';
     const message=container.querySelector('[data-queue-message]');let sync;
     const queue=createQueue({storage,onChange:()=>sync?.changed(),onError:text=>message.textContent=text});
+    if(options.adapter)queue.reconnectEditor(options.adapter.capture());
+    let requestedId=null;
+    function processRequested() {
+      if(!requestedId || !options.adapter || !queue.snapshot().items.some(x=>x.id===requestedId))return;
+      const id=requestedId;requestedId=null;
+      perform(()=>queue.resume(id,options.adapter));render();
+    }
     function perform(fn){try{fn();message.textContent="端末に保存しました。";return true;}catch(error){message.textContent=error.message;return false;}}
     function render() {
       const list=container.querySelector('[data-queue-items]');list.replaceChildren();
@@ -103,7 +142,7 @@
         const remove=document.createElement('button');remove.type='button';remove.textContent='項目を削除';remove.onclick=()=>{if(root.confirm('この調査項目と保存見積を削除しますか？必要な場合は先にバックアップしてください。')&&perform(()=>queue.remove(item.id)))render();};actions.append(remove);
       }
     }
-    sync=Sync.mountStatus(container.querySelector('[data-queue-sync]'),{namespace:'queue',storage,getLocal:queue.snapshot,backupExtras:queue.backupExtras,hasLocal:()=>storage?.getItem(key)!=null,validate,canApply:()=>!container.contains(document.activeElement)||!document.activeElement.matches('input,textarea,select'),applyRemote:data=>{queue.applyRemote(data);render();}});
+    sync=Sync.mountStatus(container.querySelector('[data-queue-sync]'),{namespace:'queue',storage,getLocal:queue.snapshot,backupExtras:queue.backupExtras,hasLocal:()=>storage?.getItem(key)!=null,validate,canApply:()=>!container.contains(document.activeElement)||!document.activeElement.matches('input,textarea,select'),applyRemote:data=>{queue.applyRemote(data);render();if(requestedId)setTimeout(processRequested,0);}});
     container.querySelector('[data-queue-add]').onsubmit=event=>{event.preventDefault();const form=event.currentTarget;if(perform(()=>queue.add(form.elements.manufacturer.value,form.elements.partNumber.value))){form.elements.partNumber.value='';render();}};
     container.querySelector('[data-queue-handoff]').onclick=async()=>{const text=queue.handoff(root.location.href);const area=container.querySelector('[data-handoff]');area.value=text;container.querySelector('[data-handoff-label]').hidden=false;area.focus();area.select();try{await root.navigator.clipboard.writeText(text);message.textContent='引き継ぎ文をコピーしました。';}catch(_){message.textContent='表示した文をコピーしてWorkへ貼り付けてください。';}};
     const fileInput=container.querySelector('[data-queue-file]');let importGeneration=0;
@@ -123,7 +162,7 @@
       }catch(error){message.textContent=error.message||"復元できませんでした。";}finally{if(generation===importGeneration)fileInput.value="";}
     };
     render();sync.start();
-    return {queue,sync,capture:draft=>perform(()=>queue.capture(draft)),resumeRequested(id){const item=queue.snapshot().items.find(x=>x.id===id);if(item&&options.adapter)perform(()=>{if(options.adapter.apply(item.draft || options.adapter.fresh(item))===false)throw Error("見積を保存できません。");});render();}};
+    return {queue,sync,detachEditor:queue.detachEditor,capture:draft=>perform(()=>queue.capture(draft)),resumeRequested(id){requestedId=id;processRequested();}};
   }
   root.PartScoutQueue={key,statuses,validate,validateDraft,createQueue,mount};
   if(typeof module!=="undefined"&&module.exports)module.exports=root.PartScoutQueue;

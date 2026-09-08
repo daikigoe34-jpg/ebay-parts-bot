@@ -21,12 +21,18 @@
     if (!["main","shipping","queue"].includes(options.namespace)) throw Error("Invalid namespace");
     const key = `part-scout-sync-v1:${options.namespace}`;
     const storage = options.storage;
+    const Persistence = root.PartScoutPersistence || require("./persistence.js");
+    const journal = Persistence.createStore(storage,{guardedKeys:[key]});
     const transport = options.fetch || ((...args) => root.fetch(...args));
     let meta = {version:1,userKey:null,baseRevision:0,baseData:null,pending:null,conflict:null,attempt:null};
     let status = "checking", timer, busy, disposed = false, blocked = false;
     function emit(next) { status = next; options.onStatus?.(next, meta.updatedAt); }
     function persist() {
-      try { storage.setItem(key, JSON.stringify(meta)); blocked = false; return true; }
+      try {
+        const result = journal.write(key,meta);
+        if (!result.ok) { blocked=true; emit(result.conflict ? "tab-conflict" : "storage-error"); return false; }
+        blocked=false; return true;
+      }
       catch (_) { blocked = true; emit("storage-error"); return false; }
     }
     function validate(value) {
@@ -166,9 +172,9 @@
     const refresh = () => { if (!root.document?.hidden) schedule(); };
     function start() { root.addEventListener?.("online",refresh);root.addEventListener?.("focus",refresh);root.document?.addEventListener("visibilitychange",refresh);root.document?.addEventListener("focusout",refresh);return flush(); }
     function dispose() { disposed = true; clearTimeout(timer);root.removeEventListener?.("online",refresh);root.removeEventListener?.("focus",refresh);root.document?.removeEventListener("visibilitychange",refresh);root.document?.removeEventListener("focusout",refresh); }
-    return {changed,flush,resolve,start,dispose,get status(){return status;},backup(){let saved=null,history=[];try{saved=JSON.parse(storage.getItem(`${key}:recovery`));history=JSON.parse(storage.getItem(`${key}:conflict-recovery`)||"[]");}catch(_){}return {schemaVersion:1,namespace:options.namespace,local:copy(options.getLocal()),remote:copy(meta.conflict?.data ?? meta.baseData),recovery:saved,conflictRecovery:history.at(-1)||null,conflictHistory:history,...options.backupExtras?.()};}};
+    return {changed,flush,resolve,start,dispose,get status(){return status;},backup(){let saved=null,history=[];try{saved=JSON.parse(storage.getItem(`${key}:recovery`));history=JSON.parse(storage.getItem(`${key}:conflict-recovery`)||"[]");}catch(_){}return {schemaVersion:1,namespace:options.namespace,local:copy(options.getLocal()),remote:copy(meta.conflict?.data ?? meta.baseData),recovery:saved,conflictRecovery:history.at(-1)||null,conflictHistory:history,...options.backupExtras?.(),tabConflicts:[...(options.backupExtras?.().tabConflicts||[]),...journal.conflicts(key).map(record=>({...record,local:record.local?.pending||record.local?.baseData,remote:record.remote?.pending||record.remote?.baseData}))]};}};
   }
-  const labels = {checking:"同期を確認中…",waiting:"端末に保存済み・同期待ち",synced:"同期済み",conflict:"別の端末の編集と競合しています。両方をバックアップして選んでください。","auth-required":"同期にはログインが必要です。端末の保存は残ります。",unavailable:"同期を利用できません（オフライン・静的ホスト等）。端末で続けられます。","account-changed":"ログインが変わりました。前のアカウントの編集を保護して同期を停止しました。元のアカウントで再開してください。","storage-error":"保存領域またはデータ容量を確認してください。バックアップを保存してください。"};
+  const labels = {"tab-conflict":"別のタブで編集が保存されました。両方をバックアップして再読み込みしてください。",checking:"同期を確認中…",waiting:"端末に保存済み・同期待ち",synced:"同期済み",conflict:"別の端末の編集と競合しています。両方をバックアップして選んでください。","auth-required":"同期にはログインが必要です。端末の保存は残ります。",unavailable:"同期を利用できません（オフライン・静的ホスト等）。端末で続けられます。","account-changed":"ログインが変わりました。前のアカウントの編集を保護して同期を停止しました。元のアカウントで再開してください。","storage-error":"保存領域またはデータ容量を確認してください。バックアップを保存してください。"};
   function versionBackup(namespace, data) {
     if (namespace === "main") return {format:"part-scout-backup",version:1,data};
     return {format:namespace === "shipping" ? "part-scout-shipping-draft-v1" : "part-scout-research-queue-v1",data};
@@ -191,7 +197,7 @@
       for (const [i,record] of (backup.conflictHistory||[]).entries()) for(const side of ["local","remote"]) choices.push({label:`競合保存 ${i+1} ${side === "local" ? "端末" : "クラウド"} ${record.savedAt}`,data:record[side]});
       for (const [i,record] of (backup.tabConflicts||[]).entries()) for(const side of ["local","remote"]) choices.push({label:`別タブの保存 ${i+1} ${side === "local" ? "このタブ" : "別タブ"}`,data:record[side]});
       const select=container.querySelector('[data-sync-version]');select.replaceChildren();
-      choices=choices.filter(x=>x.data!==null);
+      choices=choices.filter(x=>x.data!=null);
       for (const [i,choice] of choices.entries()) {const option=document.createElement('option');option.value=String(i);option.textContent=choice.label;select.append(option);}
     }
     versions.addEventListener('toggle',()=>{if(versions.open)listVersions();});

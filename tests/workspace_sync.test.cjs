@@ -46,3 +46,18 @@ test('GET-to-PUT account switch reports account-changed and preserves pending an
   assert.deepEqual(a.sync.backup().local,{part:'alice-private'});assert.deepEqual(a.sync.backup().conflictRecovery,recovery);
   a.sync.dispose();
 });
+test('a stale tab cannot erase another tab pending journal while receiving cloud data',async()=>{
+  const {createStore}=require('../web/persistence.js');const shared=memory(),s=server();
+  s.doc={...s.doc,revision:1,data:{weight:'1'},updatedAt:new Date().toISOString()};
+  shared.setItem('draft',JSON.stringify({weight:'1'}));
+  function tab(){const store=createStore(shared,{guardedKeys:['draft']});let local=store.read('draft',null);const sync=createSync({namespace:'shipping',storage:shared,getLocal:()=>local,hasLocal:()=>true,validate:x=>x,applyRemote:x=>{if(!store.write('draft',x).ok)return false;local=x;},fetch:(...a)=>s.fetch(...a),debounceMs:100000});return {sync,edit(x){local=x;const result=store.write('draft',x);if(result.ok)sync.changed();return result;}};}
+  const a=tab();await a.sync.flush();const b=tab();await b.sync.flush();
+  a.edit({weight:'UNSENT_A'});s.doc={...s.doc,revision:2,data:{weight:'REMOTE_C'}};await b.sync.flush();
+  assert.equal(JSON.parse(shared.getItem('draft')).weight,'UNSENT_A');
+  assert.equal(JSON.parse(shared.getItem('part-scout-sync-v1:shipping')).pending.weight,'UNSENT_A');
+  assert.equal(b.sync.status,'tab-conflict');
+  a.sync.dispose();b.edit({weight:'NEW_B'});b.sync.dispose();
+  const reopened=tab();reopened.edit({weight:'LATER'});
+  assert.ok(JSON.stringify(reopened.sync.backup().tabConflicts).includes('UNSENT_A'));
+  reopened.sync.dispose();
+});
