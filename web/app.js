@@ -1,5 +1,13 @@
 "use strict";
 
+const Persistence = typeof PartScoutPersistence !== "undefined"
+  ? PartScoutPersistence : require("./persistence.js");
+const localStore = Persistence.createStore((() => {
+  try { return typeof localStorage !== "undefined" ? localStorage : null; } catch (_) { return null; }
+})());
+const USER_DATA_KEY = "part-scout-user-v1";
+const RESULT_CACHE_KEY = "part-scout-results-v1";
+
 const STORAGE_KEYS = {
   settings: "part-scout-settings-v4",
   legacySettings: ["part-scout-settings-v3", "part-scout-settings-v2"],
@@ -30,6 +38,8 @@ const DEFAULT_SETTINGS = {
   minimumSold90d: 3,
   minimumMarketScore: 55,
   minimumDemandRatio: 0.1,
+  feesConfirmed: false,
+  internationalDiscountConfirmed: false,
 };
 
 const QUALITY_LABELS = {
@@ -71,7 +81,7 @@ const ORIGIN_LABELS = {
 
 const DEFAULT_SETUP_STATUS = {
   schema_version: 1,
-  app_version: "0.4.0",
+  app_version: "0.4.1",
   ready: false,
   status: "not_checked",
   mode: "production_browse_only",
@@ -87,6 +97,7 @@ const DEFAULT_SETUP_STATUS = {
 };
 
 const DATA_REFRESH_MAX_AGE_MS = 5 * 60 * 1000;
+const TARIFF_POLICY_REVIEW = "2026-09-08";
 
 function clone(value) {
   return typeof structuredClone === "function"
@@ -95,17 +106,11 @@ function clone(value) {
 }
 
 function loadJson(key, fallback) {
-  if (typeof localStorage === "undefined") return clone(fallback);
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : clone(fallback);
-  } catch (_) {
-    return clone(fallback);
-  }
+  return localStore.read(key, clone(fallback));
 }
 
 function saveJson(key, value) {
-  if (typeof localStorage !== "undefined") localStorage.setItem(key, JSON.stringify(value));
+  return localStore.write(key, value);
 }
 
 function loadWithLegacy(currentKey, legacyKeys, fallback) {
@@ -129,11 +134,9 @@ function loadSettings() {
 
 function loadCosts() {
   let merged = {};
-  if (typeof localStorage !== "undefined") {
-    for (const key of [...STORAGE_KEYS.legacyCosts].reverse()) {
-      const value = loadJson(key, {});
-      if (value && typeof value === "object") merged = { ...merged, ...value };
-    }
+  for (const key of [...STORAGE_KEYS.legacyCosts].reverse()) {
+    const value = loadJson(key, {});
+    if (value && typeof value === "object") merged = { ...merged, ...value };
   }
   const current = loadJson(STORAGE_KEYS.costs, {});
   return { ...merged, ...(current && typeof current === "object" ? current : {}) };
@@ -147,7 +150,85 @@ const state = {
   costs: loadCosts(),
   filter: "",
   sort: "profit",
+  workspace: { tab: "today", expanded: [], scrollY: 0 },
+  offline: false,
 };
+
+function isRecord(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function validateUserData(value) {
+  if (!isRecord(value) || !isRecord(value.settings) || !isRecord(value.costs) || !isRecord(value.workspace)) {
+    throw new Error("保存ファイルの形式が違います。");
+  }
+  for (const [key, setting] of Object.entries(value.settings)) {
+    if (!Object.hasOwn(DEFAULT_SETTINGS, key)) continue;
+    if (typeof DEFAULT_SETTINGS[key] === "boolean" && typeof setting !== "boolean") throw new Error("設定値の形式が違います。");
+    if (typeof DEFAULT_SETTINGS[key] !== "boolean" && !["number", "string"].includes(typeof setting)) throw new Error("設定値の形式が違います。");
+    if (typeof setting === "number" && !Number.isFinite(setting)) throw new Error("設定値が数値ではありません。");
+  }
+  if (Object.keys(value.costs).length > 5000) throw new Error("保存件数が多すぎます。");
+  for (const [part, costs] of Object.entries(value.costs)) {
+    if (!isPlausiblePartNumber(part) || !isRecord(costs)) throw new Error("品番または金額の形式が違います。");
+    for (const [key, v] of Object.entries(costs)) {
+      if (["__proto__", "constructor", "prototype"].includes(key)
+          || !["string", "number", "boolean"].includes(typeof v)) throw new Error("金額の形式が違います。");
+      if (typeof v === "number" && !Number.isFinite(v)) throw new Error("金額が数値ではありません。");
+    }
+  }
+  return value;
+}
+
+function applyUserData(data) {
+  state.settings = { ...DEFAULT_SETTINGS };
+  for (const key of Object.keys(DEFAULT_SETTINGS)) {
+    if (Object.hasOwn(data.settings, key)) state.settings[key] = data.settings[key];
+  }
+  state.costs = clone(data.costs);
+  state.workspace = {
+    tab: ["today", "all", "observation", "settings"].includes(data.workspace.tab) ? data.workspace.tab : "today",
+    expanded: Array.isArray(data.workspace.expanded) ? data.workspace.expanded.filter(v => typeof v === "string").slice(0, 5000) : [],
+    scrollY: Math.max(0, Number(data.workspace.scrollY) || 0),
+  };
+  state.filter = String(data.workspace.filter || "").slice(0, 200);
+  state.sort = ["profit", "score", "sold", "competition", "price"].includes(data.workspace.sort) ? data.workspace.sort : "profit";
+}
+
+let saveFailed = false;
+function userDataSnapshot() {
+  return { settings: state.settings, costs: state.costs,
+    workspace: { ...state.workspace, filter: state.filter, sort: state.sort }, savedAt: new Date().toISOString() };
+}
+
+function showSaveStatus(ok, message) {
+  saveFailed = !ok;
+  if (typeof document === "undefined") return;
+  const el = document.querySelector("#save-status");
+  if (!el) return;
+  el.textContent = message || (ok ? `端末に保存済み ${new Date().toLocaleTimeString("ja-JP")}` : "保存できません。設定の「バックアップ」を押してください。");
+  el.classList.toggle("save-error", !ok);
+}
+
+function persistUserData() {
+  const result = saveJson(USER_DATA_KEY, userDataSnapshot());
+  showSaveStatus(result.ok);
+  return result.ok;
+}
+
+function makeBackup() {
+  return JSON.stringify({ format: "part-scout-backup", version: 1, data: userDataSnapshot() }, null, 2);
+}
+
+function restoreBackup(text) {
+  if (typeof text !== "string" || text.length > 5_000_000) throw new Error("ファイルが大きすぎます。");
+  const parsed = JSON.parse(text);
+  if (parsed?.format !== "part-scout-backup" || parsed.version !== 1) throw new Error("Part Scoutのバックアップを選んでください。");
+  const data = validateUserData(parsed.data);
+  if (!saveJson(USER_DATA_KEY, data).ok) throw new Error("保存領域が不足しています。現在のデータは変更していません。");
+  applyUserData(data);
+  return true;
+}
 
 let lastLoadedAt = 0;
 let loadDataPromise = null;
@@ -194,7 +275,7 @@ function number(value, fallback = 0) {
 }
 
 function yen(value) {
-  return `${Math.round(number(value)).toLocaleString("ja-JP")}円`;
+  return Number.isFinite(Number(value)) ? `${Math.round(Number(value)).toLocaleString("ja-JP")}円` : "未確定";
 }
 
 function usd(value) {
@@ -202,7 +283,7 @@ function usd(value) {
 }
 
 function percent(value) {
-  return `${(number(value) * 100).toFixed(1)}%`;
+  return Number.isFinite(Number(value)) ? `${(Number(value) * 100).toFixed(1)}%` : "未確定";
 }
 
 function normalizePartNumber(value) {
@@ -299,8 +380,8 @@ function tariffScenario(originCode) {
   const origin = String(originCode || "").toUpperCase();
   if (origin === "JP") return { rate: 15, low: 15, high: 25, label: "日本原産・関税仮置き" };
   if (origin === "US") return { rate: 0, low: 0, high: 15, label: "米国原産・関税仮置き" };
-  if (origin) return { rate: 25, low: 15, high: 50, label: "他国原産・保守的仮置き" };
-  return { rate: 25, low: 15, high: 50, label: "原産国不明・保守的仮置き" };
+  if (origin) return { rate: 25, low: 15, high: 50, label: "他国原産・未分類の試算" };
+  return { rate: 25, low: 15, high: 50, label: "原産国不明・未分類の試算" };
 }
 
 function internationalFeeRate(monthlySalesUsd) {
@@ -332,7 +413,7 @@ function feeProfile(settings = state.settings, product = {}) {
 }
 
 function isSalesAutoVerified(product) {
-  return product.sales_auto_verified === true && product.sales_confidence === "high";
+  return !product.history_only && product.sales_auto_verified === true && product.sales_confidence === "high";
 }
 
 function isDemoPayload(payload = {}) {
@@ -340,7 +421,7 @@ function isDemoPayload(payload = {}) {
   if (payload.demo_data === true) return true;
   const productionStatus = String(payload.automation?.production_api?.status || "").toLowerCase();
   if (productionStatus.startsWith("demo")) return true;
-  return (payload.products || []).some((product) => {
+  return (Array.isArray(payload.products) ? payload.products : []).some((product) => {
     const title = String(product?.title || "").toUpperCase();
     const source = String(product?.source || "").toLowerCase();
     return title.startsWith("DEMO:") || source.startsWith("demo_") || source.includes("demo_production");
@@ -454,17 +535,77 @@ function productDefaults(product) {
     customsFixedJpy: 0,
     originCode: String(product.country_of_origin || ""),
     tariffRate,
+    htsus: "",
+    dutyQuoteJpy: "",
     supplierConfirmed: false,
     tariffConfirmed: false,
   };
 }
 
 function getCostValues(product) {
-  return { ...productDefaults(product), ...(state.costs[product.part_number] || {}) };
+  const values = { ...productDefaults(product), ...(state.costs[product.part_number] || {}) };
+  values.supplierConfirmed = values.supplierConfirmed === true && recentConfirmation(values.supplierConfirmedAt);
+  values.tariffConfirmed = values.tariffConfirmed === true && recentConfirmation(values.tariffConfirmedAt)
+    && values.tariffPolicyReview === TARIFF_POLICY_REVIEW
+    && number(values.tariffSalePriceUsd, -1) === number(values.salePriceUsd, -2);
+  return values;
+}
+
+function validNumber(value, min = 0, max = 1e9) {
+  if (typeof value === "boolean" || value == null || String(value).trim() === "") return false;
+  const n = Number(value);
+  return Number.isFinite(n) && n >= min && n <= max;
+}
+
+function recentConfirmation(value, maxDays = 7) {
+  const age = Date.now() - Date.parse(String(value || ""));
+  return Number.isFinite(age) && age >= -300000 && age <= maxDays * 86400000;
+}
+
+function confirmedExchangeRate() {
+  if (!state.settings.autoExchangeRate) return validNumber(state.settings.exchangeRate, 1, 10000);
+  const rate = state.apiPayload?.cost_defaults?.exchange_rate;
+  return isRecord(rate) && rate.fallback === false && validNumber(rate.rate, 1, 10000) && recentConfirmation(rate.date);
+}
+
+function costInputErrors(values) {
+  const errors = [];
+  for (const key of ["salePriceUsd", "buyerShippingUsd", "procurementJpy", "domesticShippingJpy", "internationalShippingJpy", "packagingJpy", "customsFixedJpy", "tariffRate"]) {
+    if (!validNumber(values[key], 0, key === "tariffRate" ? 1000 : 1e9)) errors.push(key);
+  }
+  if (values.dutyQuoteJpy !== "" && !validNumber(values.dutyQuoteJpy)) errors.push("dutyQuoteJpy");
+  for (const [key, fallback] of Object.entries(DEFAULT_SETTINGS)) {
+    if (typeof fallback !== "number" || (key === "exchangeRate" && state.settings.autoExchangeRate)) continue;
+    const max = /Rate$/.test(key) && key !== "exchangeRate" ? 100 : 1e9;
+    if (!validNumber(state.settings[key], key === "exchangeRate" ? 1 : 0, max)) errors.push(key);
+  }
+  return errors;
+}
+
+function updateCostValue(product, key, value) {
+  const previous = getCostValues(product);
+  const next = { ...(state.costs[product.part_number] || {}), [key]: value };
+  if (["supplierConfirmed", "tariffConfirmed"].includes(key) && value === true) {
+    const fields = key === "supplierConfirmed"
+      ? ["procurementJpy", "domesticShippingJpy", "internationalShippingJpy", "packagingJpy"]
+      : ["originCode", "htsus", "dutyQuoteJpy", "customsFixedJpy"];
+    for (const field of fields) next[field] = previous[field];
+    next[`${key}At`] = new Date().toISOString();
+    if (key === "tariffConfirmed") {
+      next.tariffSalePriceUsd = previous.salePriceUsd;
+      next.tariffPolicyReview = TARIFF_POLICY_REVIEW;
+    }
+  } else if (String(previous[key]) !== String(value)) {
+    if (["procurementJpy", "domesticShippingJpy", "internationalShippingJpy", "packagingJpy"].includes(key)) next.supplierConfirmed = false;
+    if (["salePriceUsd", "originCode", "tariffRate", "htsus", "dutyQuoteJpy", "customsFixedJpy"].includes(key)) next.tariffConfirmed = false;
+    if (key === "originCode") { next.tariffRate = tariffScenario(value).rate; next.dutyQuoteJpy = ""; next.htsus = ""; }
+  }
+  state.costs[product.part_number] = next;
 }
 
 function calculateProfit(product) {
   const values = getCostValues(product);
+  const inputErrors = costInputErrors(values);
   const salePriceUsd = number(values.salePriceUsd, number(product.price_median_usd));
   const buyerShippingUsd = number(values.buyerShippingUsd);
   const exchangeRate = effectiveExchangeRate();
@@ -480,7 +621,8 @@ function calculateProfit(product) {
     + feeBaseUsd * number(state.settings.additionalFvfRate) / 100;
   const perOrderFeeUsd = feeBaseUsd <= 10 ? 0.30 : 0.40;
   const finalValueFeeJpy = (percentageFeeUsd + perOrderFeeUsd) * exchangeRate;
-  const internationalRate = internationalFeeRate(state.settings.monthlySalesUsd);
+  const internationalRate = state.settings.internationalDiscountConfirmed === true
+    ? internationalFeeRate(state.settings.monthlySalesUsd) : 1.35;
   const internationalFeeJpy = feeBaseUsd * internationalRate / 100 * exchangeRate;
   const promotedFeeJpy = feeBaseUsd * number(state.settings.promotedRate) / 100 * exchangeRate;
   const insertionFeeJpy = Math.max(0, number(state.settings.insertionFeeUsd)) * exchangeRate;
@@ -502,16 +644,16 @@ function calculateProfit(product) {
     + payoneerAnnualAllocation;
 
   const tariffRate = Math.max(0, number(values.tariffRate, tariffScenario(values.originCode).rate));
-  const tariff = salePriceUsd * exchangeRate * tariffRate / 100;
+  const tariff = validNumber(values.dutyQuoteJpy) ? Number(values.dutyQuoteJpy) : salePriceUsd * exchangeRate * tariffRate / 100;
   const returnReserve = grossJpy * number(state.settings.returnReserveRate) / 100;
   const fixedCosts = number(values.procurementJpy)
     + number(values.domesticShippingJpy)
     + number(values.internationalShippingJpy)
     + number(values.packagingJpy)
     + number(values.customsFixedJpy);
-  const totalCost = ebayFee + payoneerFee + tariff + returnReserve + fixedCosts;
+  const totalCost = inputErrors.length ? NaN : ebayFee + payoneerFee + tariff + returnReserve + fixedCosts;
   const profit = grossJpy - totalCost;
-  const margin = grossJpy > 0 ? profit / grossJpy : 0;
+  const margin = inputErrors.length ? NaN : grossJpy > 0 ? profit / grossJpy : 0;
 
   const hasProcurement = number(values.procurementJpy) > 0;
   const hasShipping = number(values.internationalShippingJpy) > 0;
@@ -528,16 +670,23 @@ function calculateProfit(product) {
   const operationalFailed = operationalChecks.filter(([passed]) => !passed).map(([, label]) => label);
   const confirmationChecks = [
     [salesVerified, "販売差分30日"],
-    [values.supplierConfirmed === true, "仕入条件"],
-    [values.tariffConfirmed === true, "原産国・関税"],
+    [confirmedExchangeRate(), "為替"],
+    [state.settings.feesConfirmed === true, "手数料設定"],
+    [values.supplierConfirmed === true && recentConfirmation(values.supplierConfirmedAt), "仕入条件"],
+    [values.tariffConfirmed === true && recentConfirmation(values.tariffConfirmedAt)
+      && Boolean(values.originCode) && values.originCode !== "OTHER"
+      && /^\d{10}$/.test(String(values.htsus || "").replace(/[.\s]/g, ""))
+      && validNumber(values.dutyQuoteJpy), "原産国・関税"],
   ];
   const confirmationFailed = confirmationChecks.filter(([passed]) => !passed).map(([, label]) => label);
-  const hasCosts = hasProcurement && hasShipping;
+  const hasCosts = hasProcurement && hasShipping && inputErrors.length === 0;
   const passes = hasCosts && operationalFailed.length === 0 && confirmationFailed.length === 0;
   const provisional = hasCosts && operationalFailed.length === 0 && confirmationFailed.length > 0;
 
   let judgment = "自動観測中";
-  if (!salesVerified) judgment = "自動観測中";
+  if (inputErrors.length) judgment = "入力を確認";
+  else if (product.history_only) judgment = "保存済み・更新待ち";
+  else if (!salesVerified) judgment = "自動観測中";
   else if (!hasProcurement) judgment = "仕入価格を確認";
   else if (!hasShipping) judgment = "送料を確認";
   else if (profit <= 0) judgment = "赤字見込み";
@@ -553,6 +702,7 @@ function calculateProfit(product) {
     returnReserve, totalCost, profit, margin, hasProcurement, hasShipping, hasCosts,
     salesVerified, decisionSold, operationalFailed, confirmationFailed, passes,
     provisional, judgment,
+    inputErrors,
   };
 }
 
@@ -566,6 +716,8 @@ function badgeClass(judgment) {
 }
 
 function combinedJudgment(product, profit = calculateProfit(product)) {
+  if (profit.inputErrors.length) return "入力を確認";
+  if (product.history_only) return "保存済み・更新待ち";
   if (!profit.salesVerified) return "自動観測中";
   if (profit.hasCosts) {
     if (profit.passes) return "購入候補";
@@ -580,6 +732,8 @@ function combinedJudgment(product, profit = calculateProfit(product)) {
 function nextAction(product, profit = calculateProfit(product), setupStatus = state.setupStatus) {
   const setup = setupPresentation(setupStatus);
   if (!setupStatus?.ready) return setup.action;
+  if (profit.inputErrors.length) return "空欄・負の金額・料率を確認してください";
+  if (product.history_only) return "保存済みデータです。接続後の更新をお待ちください";
   if (!profit.salesVerified) return "操作不要。販売差分を自動観測中";
   if (profit.operationalFailed.some((label) => ["販売ペース下限", "競合データ", "市場スコア", "販売÷競合"].includes(label))) {
     return `${profit.operationalFailed[0]}が基準未達。次候補へ進む`;
@@ -587,8 +741,10 @@ function nextAction(product, profit = calculateProfit(product), setupStatus = st
   if (!profit.hasProcurement) return "楽天／モノタロウで仕入価格を確認";
   if (profit.profit <= 0) return "仕入価格か販売価格を見直す";
   if (profit.operationalFailed.length) return `${profit.operationalFailed[0]}が基準未達。次候補へ進む`;
-  if (profit.values.supplierConfirmed !== true) return "仕入先で価格・在庫・送料を確認";
-  if (profit.values.tariffConfirmed !== true) return "原産国とDDP関税を確認";
+  if (profit.confirmationFailed.includes("為替")) return "為替が未取得です。設定で確認してください";
+  if (profit.confirmationFailed.includes("手数料設定")) return "設定でPayoneerなどの実料率を確認";
+  if (profit.confirmationFailed.includes("仕入条件")) return "仕入先で価格・在庫・送料を確認";
+  if (profit.confirmationFailed.includes("原産国・関税")) return "原産国・HTSUS・DDP関税額を確認";
   if (profit.passes) return "購入候補。仕入判断へ進む";
   return product.next_action || "詳細を確認";
 }
@@ -715,7 +871,12 @@ function observationProgress(product) {
 }
 
 function mergeProducts() {
-  state.products = selectRenderableProducts(state.setupStatus, state.apiPayload).map(normalizeProduct);
+  const payload = state.apiPayload;
+  const generatedAt = Date.parse(String(payload?.generated_at || ""));
+  const real = !isDemoPayload(payload) && Array.isArray(payload?.products)
+    && Number.isFinite(generatedAt) && generatedAt <= Date.now() + 300000;
+  const historyOnly = !state.setupStatus.ready || !isPayloadFresh(payload) || state.offline;
+  state.products = real ? payload.products.map(product => normalizeProduct({ ...product, history_only: historyOnly })) : [];
 }
 
 function productSortValue(product, mode) {
@@ -724,7 +885,7 @@ function productSortValue(product, mode) {
   if (mode === "competition") return -number(product.active_competition, 999999);
   if (mode === "price") return number(product.price_median_usd);
   if (mode === "score") return number(product.market_score);
-  return profit.salesVerified ? profit.profit : -1e9 + number(product.market_score);
+  return profit.salesVerified && profit.hasCosts ? profit.profit : -1e9 + number(product.market_score);
 }
 
 function getVisibleProducts() {
@@ -739,6 +900,7 @@ function getVisibleProducts() {
 function renderSetup() {
   if (!els.setupPanel) return;
   const view = setupPresentation(state.setupStatus);
+  els.setupPanel.hidden = state.setupStatus.ready === true;
   els.setupPanel.className = `setup-panel setup-${view.tone}`;
   els.setupBadge.textContent = view.badge;
   els.setupBadge.className = `health-badge badge-${view.tone === "good" ? "good" : view.tone === "bad" ? "bad" : "warn"}`;
@@ -765,8 +927,8 @@ function renderAutomation() {
   const production = automation.production_api || state.setupStatus.details || {};
   const generated = state.apiPayload?.generated_at ? new Date(state.apiPayload.generated_at) : null;
   const ageHours = generated && !Number.isNaN(generated.getTime()) ? (Date.now() - generated.getTime()) / 3600000 : Infinity;
-  const fresh = state.setupStatus.ready && ageHours <= 48;
-  els.automationHealth.textContent = fresh ? "自動運転中" : state.setupStatus.ready ? "更新を確認" : "初回設定中";
+  const fresh = state.setupStatus.ready && isPayloadFresh(state.apiPayload) && !isDemoPayload(state.apiPayload);
+  els.automationHealth.textContent = state.offline ? "保存済みを表示" : fresh ? "自動運転中" : state.setupStatus.ready ? "更新を確認" : "初回設定中";
   els.automationHealth.className = `health-badge ${fresh ? "badge-good" : "badge-warn"}`;
   if (!state.setupStatus.ready) {
     els.flowResearch.textContent = "Productionキー登録後、検索語を自動ローテーション";
@@ -792,6 +954,11 @@ function updateGlobalNextTask(sorted) {
     els.nextTaskDetail.textContent = setup.message;
     return;
   }
+  if (state.offline || !isPayloadFresh(state.apiPayload)) {
+    els.nextTaskTitle.textContent = "保存済みデータから再開できます";
+    els.nextTaskDetail.textContent = "入力内容は端末に残っています。全候補から確認でき、通信が戻ると自動更新します。更新までは購入判定を止めています。";
+    return;
+  }
   if (!sorted.length) {
     els.nextTaskTitle.textContent = "自動調査を1回実行してください";
     els.nextTaskDetail.textContent = "検索語は空欄のままで構いません。実行後は毎日自動で更新されます。";
@@ -804,13 +971,19 @@ function updateGlobalNextTask(sorted) {
     els.nextTaskDetail.textContent = "在庫、適合、原産国、DDP請求額を最終確認して仕入判断へ進みます。";
     return;
   }
-  const supplierPending = rows.find(({ profit }) => profit.salesVerified && profit.provisional && profit.values.supplierConfirmed !== true);
+  const settingsPending = rows.find(({ profit }) => profit.provisional && profit.confirmationFailed.some(label => ["為替", "手数料設定"].includes(label)));
+  if (settingsPending) {
+    els.nextTaskTitle.textContent = "設定で為替・手数料を確認してください";
+    els.nextTaskDetail.textContent = "取得できない為替や未確認のPayoneer料率では購入候補にしません。初回に実料率を設定してください。";
+    return;
+  }
+  const supplierPending = rows.find(({ profit }) => profit.salesVerified && profit.provisional && profit.confirmationFailed.includes("仕入条件"));
   if (supplierPending) {
     els.nextTaskTitle.textContent = `${supplierPending.product.part_number}の仕入条件を確認`;
     els.nextTaskDetail.textContent = "楽天またはモノタロウを押し、税込価格・在庫・国内送料を確認してください。";
     return;
   }
-  const tariffPending = rows.find(({ profit }) => profit.salesVerified && profit.provisional && profit.values.tariffConfirmed !== true);
+  const tariffPending = rows.find(({ profit }) => profit.salesVerified && profit.provisional && profit.confirmationFailed.includes("原産国・関税"));
   if (tariffPending) {
     els.nextTaskTitle.textContent = `${tariffPending.product.part_number}の原産国・DDP関税を確認`;
     els.nextTaskDetail.textContent = "画面の関税率は一次選別用です。仕入前に実際のDDP見積を確認してください。";
@@ -868,6 +1041,15 @@ function render() {
 function createProductCard(product, rank) {
   const fragment = els.template.content.cloneNode(true);
   const card = fragment.querySelector(".product-card");
+  const details = card.querySelector(".profit-details");
+  details.open = state.workspace.expanded.includes(product.part_number);
+  details.addEventListener("toggle", () => {
+    if (!card.isConnected) return;
+    const expanded = new Set(state.workspace.expanded);
+    if (details.open) expanded.add(product.part_number); else expanded.delete(product.part_number);
+    state.workspace.expanded = [...expanded];
+    persistUserData();
+  });
   const profit = calculateProfit(product);
   const judgment = combinedJudgment(product, profit);
   const values = profit.values;
@@ -906,7 +1088,7 @@ function createProductCard(product, rank) {
   card.querySelector(".procurement-value").textContent = number(values.procurementJpy) > 0 ? yen(values.procurementJpy) : "未取得";
   card.querySelector(".shipping-value").textContent = yen(values.internationalShippingJpy);
   card.querySelector(".origin-value").textContent = ORIGIN_LABELS[originCode] || originCode || "不明";
-  card.querySelector(".tariff-rate-value").textContent = `${number(values.tariffRate).toFixed(1)}%`;
+  card.querySelector(".tariff-rate-value").textContent = validNumber(values.dutyQuoteJpy) ? `見積 ${yen(values.dutyQuoteJpy)}` : `試算 ${number(values.tariffRate).toFixed(1)}%`;
   card.querySelector(".next-action-text").textContent = nextAction(product, profit);
 
   const rakutenBest = product.rakuten?.items?.[0];
@@ -922,17 +1104,9 @@ function createProductCard(product, rank) {
     const key = input.dataset.cost;
     applyCostValuesToControls([input], values);
 
-    input.addEventListener(input.type === "number" ? "input" : "change", () => {
-      state.costs[product.part_number] ||= {};
-      if (input.type === "checkbox") state.costs[product.part_number][key] = input.checked;
-      else if (input.tagName === "SELECT") state.costs[product.part_number][key] = input.value;
-      else state.costs[product.part_number][key] = number(input.value);
-      if (key === "originCode") {
-        state.costs[product.part_number].tariffRate = tariffScenario(input.value).rate;
-        const tariffInput = card.querySelector('[data-cost="tariffRate"]');
-        if (tariffInput) tariffInput.value = state.costs[product.part_number].tariffRate;
-      }
-      saveJson(STORAGE_KEYS.costs, state.costs);
+    input.addEventListener(input.type === "checkbox" || input.tagName === "SELECT" ? "change" : "input", () => {
+      updateCostValue(product, key, input.type === "checkbox" ? input.checked : input.value);
+      persistUserData();
       updateAllCardsForProduct(product.part_number);
     });
   }
@@ -940,8 +1114,9 @@ function createProductCard(product, rank) {
   return fragment;
 }
 
-function applyCostValuesToControls(controls, values) {
+function applyCostValuesToControls(controls, values, active = typeof document !== "undefined" ? document.activeElement : null) {
   for (const control of controls || []) {
+    if (control === active) continue;
     const key = control?.dataset?.cost;
     if (!key) continue;
     if (control.type === "checkbox") {
@@ -953,7 +1128,7 @@ function applyCostValuesToControls(controls, values) {
         ? selectValue
         : (selectValue ? "OTHER" : "");
     } else {
-      control.value = number(values?.[key], 0) || "";
+      control.value = values?.[key] ?? "";
     }
   }
 }
@@ -968,6 +1143,9 @@ function updateAllCardsForProduct(partNumber) {
   });
   const sorted = [...state.products].sort((a, b) => productSortValue(b, "profit") - productSortValue(a, "profit"));
   updateGlobalNextTask(sorted);
+  els.summaryPromising.textContent = String(state.products.filter(row => {
+    const p = calculateProfit(row); return p.passes || p.provisional;
+  }).length);
 }
 
 function updateProfitArea(card, product) {
@@ -978,15 +1156,18 @@ function updateProfitArea(card, product) {
   card.querySelector(".procurement-value").textContent = number(values.procurementJpy) > 0 ? yen(values.procurementJpy) : "未取得";
   card.querySelector(".shipping-value").textContent = yen(values.internationalShippingJpy);
   card.querySelector(".origin-value").textContent = ORIGIN_LABELS[originCode] || originCode || "不明";
-  card.querySelector(".tariff-rate-value").textContent = `${number(values.tariffRate).toFixed(1)}%`;
+  card.querySelector(".tariff-rate-value").textContent = validNumber(values.dutyQuoteJpy) ? `見積 ${yen(values.dutyQuoteJpy)}` : `試算 ${number(values.tariffRate).toFixed(1)}%`;
   card.querySelector(".next-action-text").textContent = nextAction(product, profit);
   card.querySelector(".fee-profile-note").textContent = `eBay料率: ${profit.feeProfile.label} ${profit.feeProfile.rate}%（超過分 ${profit.feeProfile.aboveRate}%）`;
   card.querySelector(".ebay-fee-value").textContent = yen(profit.ebayFee);
   card.querySelector(".payoneer-value").textContent = yen(profit.payoneerFee);
   card.querySelector(".tariff-value").textContent = yen(profit.tariff);
   card.querySelector(".cost-value").textContent = yen(profit.totalCost);
-  card.querySelector(".profit-value").textContent = yen(profit.profit);
-  card.querySelector(".margin-value").textContent = percent(profit.margin);
+  card.querySelector(".profit-value").textContent = profit.hasCosts ? yen(profit.profit) : "未確定";
+  card.querySelector(".margin-value").textContent = profit.hasCosts ? percent(profit.margin) : "未確定";
+  for (const input of card.querySelectorAll("[data-cost]")) {
+    input.setAttribute("aria-invalid", String(profit.inputErrors.includes(input.dataset.cost)));
+  }
   const result = card.querySelector(".profit-judgment");
   result.textContent = profit.judgment;
   result.className = `profit-judgment ${badgeClass(profit.judgment)}`;
@@ -1031,14 +1212,12 @@ function populateSettingsForm() {
 }
 
 function collectSettings() {
-  const formData = new FormData(els.settingsForm);
-  const next = { ...DEFAULT_SETTINGS };
+  const next = { ...state.settings };
   for (const key of Object.keys(DEFAULT_SETTINGS)) {
     const input = els.settingsForm.elements.namedItem(key);
     if (!input) continue;
     if (input.type === "checkbox") next[key] = input.checked;
-    else if (key === "sellerPlan") next[key] = String(formData.get(key) || DEFAULT_SETTINGS[key]);
-    else next[key] = number(formData.get(key), DEFAULT_SETTINGS[key]);
+    else next[key] = input.value;
   }
   return next;
 }
@@ -1046,19 +1225,36 @@ function collectSettings() {
 function persistSettings() {
   if (!els.settingsForm) return;
   state.settings = collectSettings();
-  saveJson(STORAGE_KEYS.settings, state.settings);
-  render();
+  persistUserData();
 }
 
 function scheduleSettingsSave() {
+  persistSettings();
   clearTimeout(settingsSaveTimer);
-  settingsSaveTimer = setTimeout(persistSettings, 180);
+  settingsSaveTimer = setTimeout(render, 180);
+}
+
+function downloadText(text, filename, type) {
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
+function csvCell(value) {
+  let text = String(value ?? "");
+  if (/^[=+@\t\r\n]/.test(text) || (/^-/.test(text) && !Number.isFinite(Number(text)))) text = `'${text}`;
+  return `"${text.replaceAll('"', '""')}"`;
 }
 
 function exportCsv() {
   const headers = [
     "品番", "メーカー", "判定", "次にすること", "90日販売下限", "90日推定", "販売精度", "観測日数", "追跡出品数", "観測増分", "競合数", "相場中央値USD",
-    "仕入価格円", "国際送料円", "原産国", "関税率", "eBay料率区分", "eBay手数料消費税込円", "Payoneer円", "関税円", "予想利益円", "利益率",
+    "仕入価格円", "国際送料円", "原産国", "関税試算率（%・実見積優先）", "eBay料率区分", "eBay手数料消費税込円", "Payoneer円", "関税円", "予想利益円", "利益率",
   ];
   const rows = state.products.map((product) => {
     const profit = calculateProfit(product);
@@ -1071,19 +1267,13 @@ function exportCsv() {
       number(profit.values.procurementJpy), number(profit.values.internationalShippingJpy),
       ORIGIN_LABELS[profit.values.originCode] || profit.values.originCode, profit.tariffRate,
       profit.feeProfile.label, Math.round(profit.ebayFee), Math.round(profit.payoneerFee), Math.round(profit.tariff),
-      Math.round(profit.profit), (profit.margin * 100).toFixed(1),
+      profit.hasCosts ? Math.round(profit.profit) : "未確定", profit.hasCosts ? (profit.margin * 100).toFixed(1) : "未確定",
     ];
   });
   const csv = [headers, ...rows]
-    .map((row) => row.map((value) => `"${String(value ?? "").replaceAll('"', '""')}"`).join(","))
+    .map((row) => row.map(csvCell).join(","))
     .join("\r\n");
-  const blob = new Blob(["\ufeff", csv], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `part-scout-${new Date().toISOString().slice(0, 10)}.csv`;
-  link.click();
-  URL.revokeObjectURL(url);
+  downloadText(`\ufeff${csv}`, `part-scout-${new Date().toISOString().slice(0, 10)}.csv`, "text/csv;charset=utf-8");
 }
 
 function applyPayloadDefaults() {
@@ -1099,42 +1289,69 @@ function applyPayloadDefaults() {
 }
 
 async function fetchJson(url, fallback) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12000);
   try {
-    const response = await fetch(`${url}?t=${Date.now()}`, { cache: "no-store" });
+    const response = await fetch(`${url}?t=${Date.now()}`, { cache: "no-store", signal: controller.signal });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return await response.json();
-  } catch (error) {
-    console.warn(`Failed to load ${url}:`, error);
-    return clone(fallback);
+    return { value: await response.json(), ok: true, offline: response.headers.get("X-Part-Scout-Offline") === "1" };
+  } catch (_) {
+    return { value: clone(fallback), ok: false, offline: true };
+  } finally {
+    clearTimeout(timeout);
   }
 }
+
+function usablePayload(payload) {
+  const date = Date.parse(String(payload?.generated_at || ""));
+  return isRecord(payload) && !isDemoPayload(payload) && Array.isArray(payload.products)
+    && Number.isFinite(date) && date <= Date.now() + 300000
+    && payload.products.every(row => isRecord(row) && isPlausiblePartNumber(row.part_number));
+}
+
+let restorePosition = true;
 
 async function loadData() {
   if (loadDataPromise) return loadDataPromise;
   loadDataPromise = (async () => {
     els.runStatus.textContent = "接続状態とeBayデータを読み込んでいます…";
-    const [setup, payload] = await Promise.all([
-      fetchJson("./data/setup_status.json", DEFAULT_SETUP_STATUS),
-      fetchJson("./data/results.json", { products: [], automation: {}, cost_defaults: {}, query: "初回調査前" }),
+    const cached = loadJson(RESULT_CACHE_KEY, null);
+    const [setupResult, payloadResult] = await Promise.all([
+      fetchJson("./data/setup_status.json", cached?.setup || state.setupStatus),
+      fetchJson("./data/results.json", cached?.payload || state.apiPayload),
     ]);
+    const setup = isRecord(setupResult.value) && typeof setupResult.value.ready === "boolean"
+      ? setupResult.value : clone(DEFAULT_SETUP_STATUS);
+    const incoming = payloadResult.value;
+    const previous = usablePayload(cached?.payload) ? cached.payload : state.apiPayload;
+    const acceptIncoming = usablePayload(incoming)
+      && (!usablePayload(previous) || Date.parse(incoming.generated_at) >= Date.parse(previous.generated_at));
+    const payload = acceptIncoming ? incoming : usablePayload(previous) ? previous : { products: [], query: "初回調査前" };
+    state.offline = !setupResult.ok || !payloadResult.ok || setupResult.offline || payloadResult.offline
+      || (setup.ready && !acceptIncoming);
     state.setupStatus = { ...clone(DEFAULT_SETUP_STATUS), ...setup, links: { ...DEFAULT_SETUP_STATUS.links, ...(setup.links || {}) } };
     state.apiPayload = payload;
+    if (setup.ready && acceptIncoming && !state.offline) saveJson(RESULT_CACHE_KEY, { setup, payload });
     applyPayloadDefaults();
 
     const generated = state.apiPayload.generated_at ? new Date(state.apiPayload.generated_at) : null;
     if (state.setupStatus.ready && generated && !Number.isNaN(generated.getTime())) {
-      els.runStatus.textContent = `更新 ${generated.toLocaleString("ja-JP")} / USDJPY ${effectiveExchangeRate().toFixed(2)}円`;
+      els.runStatus.textContent = `${state.offline ? "保存済み " : "更新 "}${generated.toLocaleString("ja-JP")} / USDJPY ${effectiveExchangeRate().toFixed(2)}円${confirmedExchangeRate() ? "" : "（仮値）"}`;
     } else {
       els.runStatus.textContent = setupPresentation(state.setupStatus).badge;
     }
-    els.qualityNotice.textContent = isDemoPayload(state.apiPayload)
+    els.qualityNotice.textContent = isDemoPayload(incoming)
       ? "デモデータは仕入判定に使用しません。Production API接続後に実データへ切り替わります。"
-      : !isPayloadFresh(state.apiPayload)
-        ? "調査結果が48時間以上古いため、仕入候補の表示を安全停止しています。次回の自動更新を確認してください。"
+      : state.offline || !isPayloadFresh(state.apiPayload)
+        ? "全候補に保存済みデータを表示します。入力は保存できますが、最新データの取得までは購入判定を止めています。"
         : (state.apiPayload.method_note || "Production Browse APIの日次差分だけで販売ペースを学習します。");
     els.qualityNotice.classList.add("is-visible");
     populateSettingsForm();
     render();
+    if (restorePosition && typeof window !== "undefined") {
+      window.scrollTo(0, state.workspace.scrollY);
+      restorePosition = false;
+    }
     lastLoadedAt = Date.now();
   })();
   try {
@@ -1144,9 +1361,12 @@ async function loadData() {
   }
 }
 
-function activateTab(name) {
+function activateTab(name, save = true) {
+  if (!["today", "all", "observation", "settings"].includes(name)) name = "today";
   document.querySelectorAll(".tab").forEach((tab) => tab.classList.toggle("is-active", tab.dataset.tab === name));
   document.querySelectorAll(".tab-panel").forEach((panel) => panel.classList.toggle("is-active", panel.id === `tab-${name}`));
+  state.workspace.tab = name;
+  if (save) persistUserData();
 }
 
 function bindEvents() {
@@ -1156,22 +1376,43 @@ function bindEvents() {
       window.scrollTo({ top: document.querySelector(".tabs").offsetTop - 8, behavior: "smooth" });
     });
   });
-  els.filterInput?.addEventListener("input", () => { state.filter = els.filterInput.value; render(); });
-  els.sortSelect?.addEventListener("change", () => { state.sort = els.sortSelect.value; render(); });
+  els.filterInput?.addEventListener("input", () => { state.filter = els.filterInput.value; persistUserData(); render(); });
+  els.sortSelect?.addEventListener("change", () => { state.sort = els.sortSelect.value; persistUserData(); render(); });
   els.settingsForm?.addEventListener("input", scheduleSettingsSave);
   els.settingsForm?.addEventListener("change", scheduleSettingsSave);
   els.settingsForm?.addEventListener("submit", (event) => {
     event.preventDefault();
     clearTimeout(settingsSaveTimer);
     persistSettings();
+    render();
   });
   document.querySelector("#reset-settings-button")?.addEventListener("click", () => {
     state.settings = clone(DEFAULT_SETTINGS);
-    saveJson(STORAGE_KEYS.settings, state.settings);
+    clearTimeout(settingsSaveTimer);
+    persistUserData();
     populateSettingsForm();
     render();
   });
   document.querySelector("#export-button")?.addEventListener("click", exportCsv);
+  document.querySelector("#backup-button")?.addEventListener("click", () => {
+    downloadText(makeBackup(), `part-scout-backup-${new Date().toISOString().slice(0, 10)}.json`, "application/json");
+  });
+  document.querySelector("#restore-file")?.addEventListener("change", async event => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      if (file.size > 5_000_000) throw new Error("5MB以下のバックアップを選んでください。");
+      restoreBackup(await file.text());
+      populateSettingsForm();
+      els.filterInput.value = state.filter;
+      els.sortSelect.value = state.sort;
+      activateTab(state.workspace.tab, false);
+      render();
+      showSaveStatus(true, "バックアップを復元しました。");
+    } catch (error) { showSaveStatus(!saveFailed, error.message); }
+    event.target.value = "";
+  });
+  document.querySelector("#refresh-button")?.addEventListener("click", loadData);
   els.setupPrimary?.addEventListener("click", (event) => {
     if (els.setupPrimary.getAttribute("href") === "#tab-today") {
       event.preventDefault();
@@ -1181,12 +1422,42 @@ function bindEvents() {
   });
 }
 
+try {
+  const saved = loadJson(USER_DATA_KEY, null);
+  if (saved) applyUserData(validateUserData(saved));
+} catch (_) { /* Keep readable legacy data; never overwrite an incompatible save. */ }
+
 if (typeof document !== "undefined") {
+  const cached = loadJson(RESULT_CACHE_KEY, null);
+  if (usablePayload(cached?.payload) && isRecord(cached?.setup)) {
+    state.apiPayload = cached.payload;
+    state.setupStatus = cached.setup;
+    state.offline = true;
+  }
   populateSettingsForm();
   bindEvents();
+  els.filterInput.value = state.filter;
+  els.sortSelect.value = state.sort;
+  activateTab(state.workspace.tab, false);
+  render();
+  if (localStore.recovered) showSaveStatus(true, "直前の保存データから復元しました。");
   loadData();
   document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      state.workspace.scrollY = window.scrollY;
+      persistSettings();
+    }
     if (!document.hidden && shouldRefreshData(lastLoadedAt)) loadData();
+  });
+  window.addEventListener("pagehide", () => {
+    state.workspace.scrollY = window.scrollY;
+    persistSettings();
+  });
+  window.addEventListener("online", loadData);
+  window.addEventListener("offline", () => {
+    state.offline = true;
+    els.runStatus.textContent = "オフライン・保存済みデータを表示しています";
+    render();
   });
   window.addEventListener("pageshow", () => {
     if (shouldRefreshData(lastLoadedAt)) loadData();
@@ -1227,5 +1498,6 @@ if (typeof module !== "undefined" && module.exports) {
     isPayloadFresh,
     selectRenderableProducts,
     applyCostValuesToControls,
+    makeBackup, restoreBackup, updateCostValue, confirmedExchangeRate, usablePayload, csvCell,
   };
 }

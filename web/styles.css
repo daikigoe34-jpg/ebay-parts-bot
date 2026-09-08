@@ -21,6 +21,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html { background: var(--bg); }
 body {
   margin: 0;
@@ -45,6 +46,12 @@ button { cursor: pointer; }
 .app-header h1 { margin: 2px 0 4px; font-size: 1.62rem; letter-spacing: -.035em; }
 .eyebrow { margin: 0; font-size: .65rem; letter-spacing: .14em; opacity: .7; }
 .header-status { margin: 0; color: #cbd5e1; font-size: .76rem; line-height: 1.4; }
+.header-status.save-error { color: #fecaca; font-weight: 700; }
+.backup-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: start; }
+.backup-actions > * { min-height: 44px; max-width: 100%; }
+.backup-actions input[type="file"] { display: block; max-width: 100%; width: 100%; margin-top: 8px; }
+input[aria-invalid="true"] { border-color: var(--bad); background: var(--bad-bg); }
+#automation-panel > summary { cursor: pointer; font-weight: 600; min-height: 44px; padding-block: 10px; }
 .header-actions { display: flex; align-items: center; gap: 7px; flex-shrink: 0; }
 .icon-button {
   width: 42px; height: 42px; border-radius: 50%; border: 1px solid rgba(255,255,255,.25);

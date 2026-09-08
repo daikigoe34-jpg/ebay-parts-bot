@@ -19,6 +19,7 @@ jobs:
   research:
     name: Production Browse API調査・検証・保存
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     permissions:
       contents: write
     env:
@@ -59,6 +60,7 @@ jobs:
           node tests/web_core.test.cjs
           node tests/sw_core.test.cjs
           node tests/data_freshness.test.cjs
+          node --test tests/accuracy_regression.test.cjs tests/persistence.test.cjs tests/sw_offline.test.cjs
 
       - name: 構文・JSON検証
         run: |
@@ -87,7 +89,7 @@ jobs:
 
           setup = json.loads(Path("web/data/setup_status.json").read_text(encoding="utf-8"))
           assert setup.get("schema_version") == 1
-          assert setup.get("app_version") == "0.4.0"
+          assert setup.get("app_version") == "0.4.1"
           assert setup.get("mode") == "production_browse_only"
           assert setup.get("status")
 
@@ -97,7 +99,7 @@ jobs:
 
           data = json.loads(Path("web/data/results.json").read_text(encoding="utf-8"))
           assert data.get("schema_version") == 4
-          assert data.get("app_version") == "0.4.0"
+          assert data.get("app_version") == "0.4.1"
           assert isinstance(data.get("products"), list)
           assert isinstance(data.get("automation"), dict)
           assert isinstance(data.get("cost_defaults"), dict)

@@ -166,7 +166,7 @@ def normalize_country(value: Any) -> str:
     if text in COUNTRY_ALIASES:
         return COUNTRY_ALIASES[text]
     for alias, code in COUNTRY_ALIASES.items():
-        if alias and alias in text:
+        if len(alias) > 2 and re.search(r"(?<![A-Z])" + re.escape(alias) + r"(?![A-Z])", text):
             return code
     if re.fullmatch(r"[A-Z]{2}", text):
         return text
@@ -194,8 +194,8 @@ def tariff_scenario(origin_code: str) -> dict[str, Any]:
 
     The exact US duty can change with HTSUS classification, country of origin,
     Section 232 scope, temporary measures, and the carrier's DDP calculation.
-    The displayed rate only prevents the tool from overstating profit before
-    those facts are confirmed.
+    The displayed rate is a what-if assumption, not an upper bound on liability.
+    An actual DDP quote is required before a purchase can be considered.
     """
     origin = normalize_country(origin_code)
     common = {
@@ -206,7 +206,14 @@ def tariff_scenario(origin_code: str) -> dict[str, Any]:
         "requires_origin_proof": True,
         "requires_ddp_quote": True,
         "de_minimis_exemption_assumed": False,
-        "last_verified": "2026-08-15",
+        "last_verified": "2026-09-08",
+        "scope_confirmed": False,
+        "scenario_bounds_are_legal_limits": False,
+        "policy_sources": [
+            "https://content.govdelivery.com/accounts/USDHSCBP/bulletins/3f2c91c",
+            "https://content.govdelivery.com/accounts/USDHSCBP/bulletins/40b11c9",
+            "https://content.govdelivery.com/accounts/USDHSCBP/bulletins/421d887",
+        ],
     }
     if origin == "JP":
         return {
@@ -215,10 +222,14 @@ def tariff_scenario(origin_code: str) -> dict[str, Any]:
             "low_rate": 0.15,
             "high_rate": 0.25,
             "basis": "japan_origin_auto_parts_screening_baseline",
-            "confidence": "medium",
+            "confidence": "low",
             "policy_note": (
-                "Japan-origin automotive-parts screening baseline. Exact duty depends on HTSUS, "
-                "current Section 232 scope, and any other measures in force on the import date."
+                "15% is a scenario for Japan-origin parts covered by automobile Section 232 "
+                "when Column 1 duty is below 15%; otherwise Column 1 remains. The July 24, 2026 "
+                "forced-labor Section 301 action excludes Section 232-covered articles. "
+                "For nonexempt Japan-origin goods outside Section 232, MFN plus that Section 301 "
+                "duty is max(MFN, 12.5%), before any other applicable charges. "
+                "Origin alone cannot classify a part. No expired IEEPA or Section 122 duty is added."
             ),
         }
     if origin == "US":
@@ -237,18 +248,18 @@ def tariff_scenario(origin_code: str) -> dict[str, Any]:
             "rate": 0.25,
             "low_rate": 0.15,
             "high_rate": 0.50,
-            "basis": "non_japan_origin_conservative_screening",
+            "basis": "non_japan_origin_unclassified_scenario",
             "confidence": "low",
-            "policy_note": "Conservative placeholder until HTSUS and country of origin are confirmed.",
+            "policy_note": "Unclassified scenario only; 25% is not a verified tariff or an upper bound. Confirm HTSUS, origin and all applicable measures in a current DDP quote.",
         }
     return {
         **common,
         "rate": 0.25,
         "low_rate": 0.15,
         "high_rate": 0.50,
-        "basis": "unknown_origin_conservative_screening",
+        "basis": "unknown_origin_unclassified_scenario",
         "confidence": "unknown",
-        "policy_note": "Unknown-origin placeholder; never use this as the final legal duty rate.",
+        "policy_note": "Unknown-origin scenario; 25% is not a verified tariff or an upper bound. Never use it as the final legal duty rate.",
     }
 
 
@@ -283,16 +294,22 @@ def safe_float(value: Any, default: float = 0.0) -> float:
     return result if math.isfinite(result) else default
 
 
-def sold_quantity(item: Mapping[str, Any]) -> int:
+def observed_sold_quantity(item: Mapping[str, Any]) -> int | None:
+    """Missing, negative or fractional quantities are unknown, never zero sales."""
     quantities: list[int] = []
     for availability in item.get("estimatedAvailabilities") or []:
         qty = availability.get("estimatedSoldQuantity")
-        if qty is not None:
-            try:
-                quantities.append(max(0, int(qty)))
-            except (TypeError, ValueError):
-                pass
-    return max(quantities, default=0)
+        if isinstance(qty, bool) or qty is None:
+            continue
+        value = safe_float(qty, -1)
+        if value >= 0 and value.is_integer():
+            quantities.append(int(value))
+    return max(quantities) if quantities else None
+
+
+def sold_quantity(item: Mapping[str, Any]) -> int:
+    """Ranking-only compatibility helper; observations use the nullable version."""
+    return observed_sold_quantity(item) or 0
 
 
 def count_rate_interval(delta: float, days: float) -> tuple[float, float]:

@@ -31,6 +31,7 @@ try:
         percentile,
         safe_float,
         sold_quantity,
+        observed_sold_quantity,
         tariff_scenario,
     )
 except ImportError:  # Direct execution: python scripts/research.py
@@ -46,6 +47,7 @@ except ImportError:  # Direct execution: python scripts/research.py
         percentile,
         safe_float,
         sold_quantity,
+        observed_sold_quantity,
         tariff_scenario,
     )
 
@@ -256,13 +258,15 @@ class RakutenClient:
 def load_json(path: Path, default: Any) -> Any:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError):
+    except FileNotFoundError:
         return default
 
 
 def save_json(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False) + "\n", encoding="utf-8")
+    temporary.replace(path)
 
 
 def compact_text(value: Any) -> str:
@@ -314,7 +318,10 @@ def blocked_title(title: str, blocked_terms: Iterable[str]) -> bool:
 
 
 def item_price_usd(item: dict[str, Any]) -> float:
-    return safe_float((item.get("price") or {}).get("value"), 0.0)
+    price = item.get("price") or {}
+    if price.get("currency") != "USD":
+        return 0.0
+    return max(0.0, safe_float(price.get("value"), 0.0))
 
 
 def seller_key(item: dict[str, Any]) -> str:
@@ -367,7 +374,7 @@ def append_snapshot(
     rows.append({
         "item_id": item_id,
         "observed_at": observed_at.isoformat().replace("+00:00", "Z"),
-        "sold_quantity": sold_quantity(item),
+        "sold_quantity": observed_sold_quantity(item),
         "part_numbers": sorted(set(part_numbers)),
         "price_usd": round(item_price_usd(item), 2),
         "seller": seller_key(item),
@@ -476,15 +483,16 @@ def aggregate_sales_estimate(
             dt = parse_snapshot_date(row.get("observed_at"))
             if dt is None or not (observed_at - timedelta(days=100) <= dt < observed_at):
                 continue
-            try:
-                qty = max(0, int(row.get("sold_quantity", 0)))
-            except (TypeError, ValueError):
+            raw_qty = row.get("sold_quantity")
+            qty = observed_sold_quantity({"estimatedAvailabilities": [{"estimatedSoldQuantity": raw_qty}]})
+            if qty is None:
                 continue
             series.append((dt, qty))
 
         current = current_by_id.get(item_id)
-        if current is not None:
-            series.append((observed_at, sold_quantity(current)))
+        current_qty = observed_sold_quantity(current) if current is not None else None
+        if current_qty is not None:
+            series.append((observed_at, current_qty))
         if len(series) < 2:
             continue
 
@@ -495,10 +503,14 @@ def aggregate_sales_estimate(
         first_dt = deduped[0][0]
         last_dt = deduped[-1][0]
         listing_days = max((last_dt - first_dt).total_seconds() / 86400, 0.0)
-        item_delta = sum(
-            max(0, next_qty - prev_qty)
-            for (_prev_dt, prev_qty), (_next_dt, next_qty) in zip(deduped, deduped[1:])
-        )
+        # A reset/recovery must not sell the same cumulative quantity twice.
+        # The high-water baseline may undercount after a real counter reset;
+        # that uncertainty is preferable to inventing sales.
+        high_water = deduped[0][1]
+        item_delta = 0
+        for _dt, qty in deduped[1:]:
+            item_delta += max(0, qty - high_water)
+            high_water = max(high_water, qty)
         if listing_days < 7:
             short_history_ids.add(item_id)
             continue
@@ -781,7 +793,7 @@ def write_setup_status(
 ) -> None:
     payload = {
         "schema_version": 1,
-        "app_version": "0.4.0",
+        "app_version": "0.4.1",
         "checked_at": observed_at.isoformat().replace("+00:00", "Z"),
         "ready": ready,
         "status": status,
@@ -1058,7 +1070,7 @@ def run() -> int:
 
     output = {
         "schema_version": 4,
-        "app_version": "0.4.0",
+        "app_version": "0.4.1",
         "generated_at": observed_at.isoformat().replace("+00:00", "Z"),
         "marketplace": marketplace,
         "category_id": category_id,
