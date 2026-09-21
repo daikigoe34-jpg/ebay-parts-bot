@@ -13,6 +13,7 @@
   const yen=n=>n===null||!Number.isFinite(n)?'—':new Intl.NumberFormat('ja-JP',{style:'currency',currency:'JPY',maximumFractionDigits:0}).format(n);
   const usd=n=>n===null||!Number.isFinite(n)?'—':new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(n);
   const escapeHtml=value=>String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  function hasDraftChanges(){return JSON.stringify(state.draft)!==JSON.stringify(state.records.find(x=>x.id===state.draft.id)||C.newCase());}
   function toast(message){$('#toast').textContent=message;$('#toast').hidden=false;clearTimeout(timer);timer=setTimeout(()=>{$('#toast').hidden=true;},6000);}
   function saveStatus(ok,message){const el=$('#save-state');el.textContent=message||(ok?'入力を端末に保存済み':'保存できません。JSONバックアップを保存してください');el.classList.toggle('error',!ok);}
   function persist(){
@@ -103,7 +104,7 @@
     const record=JSON.parse(JSON.stringify(state.draft));record.part=C.partNumber(record.part);record.updatedAt=new Date().toISOString();
     const same=state.records.find(x=>C.caseKey(x)===C.caseKey(record));
     if(record.id&&same&&same.id!==record.id){toast('同じメーカー・品番が別の記録にあります。先にその記録を開いてください');return;}
-    if(!same&&state.records.length>=500){toast('保存は500件までです。バックアップ後に不要な記録を削除してください');return;}
+    if(!same&&!state.records.some(x=>x.id===record.id)&&state.records.length>=500){toast('保存は500件までです。バックアップ後に不要な記録を削除してください');return;}
     record.id=same?.id||record.id||crypto.randomUUID();
     const index=state.records.findIndex(x=>x.id===record.id);if(index<0)state.records.push(record);else state.records[index]=record;
     state.draft=JSON.parse(JSON.stringify(record));const ok=persist();populate();toast(ok?'調査リストに保存しました':'保存できませんでした。JSONバックアップで入力を保護してください');
@@ -140,7 +141,7 @@
   document.querySelectorAll('[data-view]').forEach(button=>button.addEventListener('click',()=>showView(button.dataset.view)));
   $('#save-record').addEventListener('click',saveRecord);
   $('#new-case').addEventListener('click',()=>{
-    if(state.draft.part||state.draft.notes||state.draft.title){if(!window.confirm('入力中の調査を新規入力に切り替えます。残す場合は先に「調査リストに保存」を押してください。'))return;}
+    if(hasDraftChanges()){if(!window.confirm('入力中の調査を新規入力に切り替えます。残す場合は先に「調査リストに保存」を押してください。'))return;}
     state.draft=C.newCase();persist();populate();$('#part').focus();
   });
   $('#choose-cheapest').addEventListener('click',()=>{const best=C.cheapestSupplier(state.draft);if(!best){toast('税込価格・国内送料・注文可能を確認した仕入先がありません');return;}state.draft.supplierId=best.id;persist();populate();toast(best.label+'を選択しました。価格・在庫の確認日もご確認ください');});
@@ -149,7 +150,7 @@
     const button=event.target.closest('button');if(!button)return;const id=button.dataset.open||button.dataset.delete;
     const row=state.records.find(x=>x.id===id);if(!row)return;
     if(button.dataset.open){
-      if(state.draft.part&&JSON.stringify(state.draft)!==JSON.stringify(state.records.find(x=>x.id===state.draft.id))&&!window.confirm('入力中の内容を、この保存済み調査に切り替えますか？'))return;
+      if(hasDraftChanges()&&!window.confirm('入力中の内容を、この保存済み調査に切り替えますか？'))return;
       state.draft=JSON.parse(JSON.stringify(row));populate();showView('research');
     }else if(window.confirm(row.part+'を調査リストから削除しますか？')){
       state.records=state.records.filter(x=>x.id!==id);if(state.draft.id===id)state.draft.id='';persist();renderList();render();

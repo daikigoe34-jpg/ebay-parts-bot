@@ -52,3 +52,20 @@ test('notes from a backup display as text without creating injected elements',()
   const next=boot(JSON.stringify(state));assert.equal(next.window.document.querySelectorAll('img[onerror]').length,0);
   assert.equal(next.window.document.querySelector('[data-field="notes"]').value,state.draft.notes);d.window.close();next.window.close();
 });
+test('a price-only draft is retained when cancelling a new case or opening another record',()=>{
+  const d=boot(),w=d.window;edit(w,'part','85915-30050');w.document.querySelector('#save-record').click();
+  w.document.querySelector('#new-case').click();edit(w,'saleUsd','87');
+  let asks=0;w.confirm=()=>{asks++;return false;};w.document.querySelector('#new-case').click();
+  assert.equal(w.document.querySelector('[data-field="saleUsd"]').value,'87');
+  w.document.querySelector('[data-view="list"]').click();w.document.querySelector('[data-open]').click();
+  assert.equal(JSON.parse(w.localStorage.getItem('part-scout-research-v1')).draft.saleUsd,'87');
+  assert.equal(asks,2);w.close();
+});
+test('the 500-record limit still allows correcting an existing part number',()=>{
+  const C=require('../web/research-core.js'),state=C.emptyState();
+  state.records=Array.from({length:500},(_,i)=>({...C.newCase('row-'+i),part:'PART-'+(1000+i)}));
+  state.draft=JSON.parse(JSON.stringify(state.records[0]));const d=boot(JSON.stringify(state)),w=d.window;
+  edit(w,'part','85915-30050');w.document.querySelector('#save-record').click();
+  const result=JSON.parse(w.localStorage.getItem('part-scout-research-v1'));
+  assert.equal(result.records.length,500);assert.equal(result.records[0].part,'85915-30050');w.close();
+});
