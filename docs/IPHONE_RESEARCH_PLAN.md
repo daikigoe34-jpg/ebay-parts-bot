@@ -11,7 +11,7 @@ Tasks:
 - [x] Wire PWA entry/cache and existing navigation; document the workflow and limitations.
 - [x] Run JS/Python regression suites and DOM integration checks for draft reload, saving, restore, quote comparison and unknown costs.
 - [ ] Browser/iPhone checks for 390px layout and offline access: blocked by browser download timeout and cloud browser localhost restrictions; documented in IPHONE_RESEARCH_TEST_REPORT.md.
-- [ ] Commit and push a reviewable feature branch/PR to the existing GitHub repository.
+- [x] Commit and save a reviewable feature branch/PR to the existing GitHub repository. PR: https://github.com/daikigoe34-jpg/ebay-parts-bot/pull/10 (draft; iPhone browser checks outstanding).
 
 Review focus: zero versus unknown; all-in quote versus transport-only quote; fee calculation and price changes against dated quotes; untrusted backup/CSV values; storage failure and concurrent tabs.
 
