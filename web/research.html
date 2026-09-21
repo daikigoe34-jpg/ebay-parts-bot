@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#10233f"><meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Part Scout"><title>リサーチ支援 | Part Scout</title>
+<link rel="manifest" href="./manifest.webmanifest"><link rel="apple-touch-icon" href="./icons/icon-512.png">
+<link rel="stylesheet" href="./research.css">
+<script defer src="./persistence.js"></script><script defer src="./research-core.js"></script><script defer src="./research-ui.js"></script>
+</head>
+<body>
+<header class="topbar"><a class="brand" href="./research.html"><span class="brand-mark" aria-hidden="true">P</span><span>Part Scout<small>リサーチ支援</small></span></a><a class="quiet-link" href="./index.html">自動調査へ ↗</a></header>
+<div class="statusbar"><span id="save-state" role="status">入力を読み込んでいます</span><span id="connection-state"></span></div>
+<main>
+<section id="view-research" class="view">
+<div class="page-heading"><div><p class="eyebrow">日本出品 → 米国向け / 新品・単品</p><h1>部品を調べる</h1></div><button id="new-case" class="button secondary" type="button">＋ 新規</button></div>
+<div class="workspace">
+<div class="editor">
+<section class="panel identity"><h2><span class="step">01</span>品番から始める</h2>
+<div class="fields"><label>メーカー<select data-field="make" id="make"></select></label><label>純正品番<input data-field="part" id="part" type="text" autocapitalize="characters" autocomplete="off" placeholder="85915-30050" maxlength="60"></label></div>
+<label>商品名<input data-field="title" type="text" placeholder="例：メインリレー" maxlength="200"></label>
+<div id="search-links" class="search-links"></div><p id="part-message" class="hint">品番を入れると、各サイトを同じ品番で開けます。</p>
+<label>商品の根拠URL<input data-field="source" type="url" placeholder="https://…" autocomplete="off"></label>
+</section>
+<details class="panel" open><summary><span class="step">02</span>売価・販売実績</summary>
+<div class="fields"><label>販売価格（USD）<input data-field="saleUsd" inputmode="decimal" placeholder="未確認"></label><label>購入者に請求する送料（USD）<input data-field="buyerShippingUsd" inputmode="decimal"></label></div>
+<div class="fields"><label>高値シナリオ（USD）<input data-field="bestUsd" inputmode="decimal" placeholder="任意"></label><label>安値シナリオ（USD）<input data-field="worstUsd" inputmode="decimal" placeholder="任意"></label></div>
+<div class="divider"></div><div class="fields"><label>90日販売数・実績（個）<input data-field="sold90" inputmode="numeric" placeholder="未確認"></label><label>365日販売数・実績（個）<input data-field="sold365" inputmode="numeric" placeholder="未確認"></label></div>
+<div class="fields"><label>集計期間の終了日<input data-field="periodEnd" type="date"></label><label>実績の確認日<input data-field="soldCheckedAt" type="date"></label></div>
+<label>販売実績の根拠URL<input data-field="soldSource" type="url" placeholder="Product ResearchのURL"></label>
+<label class="check"><input data-field="scopeConfirmed" type="checkbox"><span>日本出品・米国購入・新品・単品・集計期間を確認しました</span></label>
+<p class="hint">検索画面の所在地・期間はご自身で確認してください。販売実績は自動取得しません。未確認の販売数は空欄、0個を確認できた場合は0を入力します。</p>
+<p id="observed-sales" class="notice" hidden></p>
+</details>
+<details class="panel" open><summary><span class="step">03</span>国内の仕入先を比較</summary>
+<div class="section-actions"><span class="hint">同じ品番・新品1個の税込価格</span><button id="choose-cheapest" type="button" class="text-button">送料込み最安を選ぶ</button></div>
+<div id="suppliers"></div>
+<div class="fields"><label>梱包費（円）<input data-field="packagingJpy" inputmode="decimal" placeholder="未確認"></label><label>その他の取引費用（円）<input data-field="otherJpy" inputmode="decimal"></label></div>
+</details>
+<details class="panel" open><summary><span class="step">04</span>配送方法を比較</summary>
+<p class="hint">同じ梱包・申告額・配送先で見積もります。米国向けの取扱条件・受付窓口・規制品も確認してください。</p>
+<div class="external-tools"><a href="https://www.orangeconnex.jp/priceCalculator" target="_blank" rel="noopener noreferrer">OC見積 ↗</a><a href="https://www.post.japanpost.jp/cgi-charge/" target="_blank" rel="noopener noreferrer">日本郵便の料金確認 ↗</a></div>
+<div id="quotes"></div>
+<p class="notice">総額は、国際送料・燃油・関税・税金・通関／処理費を含む売主負担額です。輸送費だけの場合は、残りの費用を別入力します。国内集荷費も含めてください。</p>
+</details>
+<section class="panel"><h2>判断とメモ</h2><label>ご自身の判断<select data-field="status"><option value="researching">調査中</option><option value="candidate">候補として保存</option><option value="rejected">見送り</option></select></label>
+<label>メモ<textarea data-field="notes" rows="4" maxlength="4000" placeholder="適合車種、確認が必要な点、見送り理由など"></textarea></label>
+<p class="hint">「候補」はご自身の分類です。アプリが仕入可能と認定するものではありません。</p>
+<button id="save-record" class="button primary full" type="button">調査リストに保存</button>
+</section>
+</div>
+<aside class="results" aria-label="採算の比較">
+<section class="profit-panel"><p class="eyebrow">選択中の配送 / BASE</p><p id="selected-service"></p><h2>参考取引利益</h2><strong id="profit-base" class="profit-amount">—</strong><p id="profit-state"></p>
+<div class="profit-metrics"><div><span>売上利益率</span><strong id="profit-margin">—</strong></div><div><span>取引費用に対するROI</span><strong id="profit-roi">—</strong></div></div>
+<p class="result-note">固定費・所得税の控除前。売れる価格を保証するものではありません。</p></section>
+<section class="panel"><h2>配送別の参考利益</h2><div id="comparison"></div></section>
+<section class="panel"><h2>価格を変えた場合</h2><div id="scenarios"></div><div class="divider"></div><div id="target-price"></div><p class="hint">配送・関税等は入力見積額を固定した感度分析です。売価が変わる場合は再見積が必要です。</p></section>
+<details class="panel"><summary>費用の内訳</summary><dl id="breakdown" class="breakdown"></dl></details>
+<section class="panel attention"><h2>残っている確認</h2><ul id="research-warnings"></ul></section>
+</aside>
+</div>
+</section>
+<section id="view-list" class="view" hidden>
+<div class="page-heading"><div><p class="eyebrow">YOUR RESEARCH</p><h1>保存した調査</h1></div><span id="record-count" class="count-badge">0件</span></div>
+<div class="panel"><div class="fields"><label>検索<input id="list-search" type="search" placeholder="品番・メーカー・メモ"></label><label>表示<select id="list-filter"><option value="all">すべて</option><option value="researching">調査中</option><option value="candidate">候補</option><option value="rejected">見送り</option></select></label></div>
+<div class="actions"><button id="export-csv" type="button" class="button secondary">CSV保存</button><button id="backup-list" type="button" class="button secondary">バックアップ</button></div></div>
+<div id="records"></div><p id="list-empty" class="empty">まだ保存した調査はありません。品番から調査を始めてください。</p>
+</section>
+<section id="view-settings" class="view" hidden>
+<div class="page-heading"><div><p class="eyebrow">CALCULATION & DATA</p><h1>計算・保存の設定</h1></div></div>
+<section class="panel"><h2>為替と手数料</h2><p class="notice">料率の初期値は既存アプリの参考値です。実際の契約・商品カテゴリ・購入者所在地の条件に合わせてください。為替・Payoneer・購入者側の税率は未入力です。</p>
+<div id="settings-fields" class="fields"></div><label class="check"><input data-field="settings.feesConfirmed" type="checkbox"><span>eBay・Payoneerの契約と商品カテゴリに合う料率を確認しました</span></label>
+<p class="hint">購入者側の税金は売上に加算せず、eBay手数料の算定基礎に含めます。円単位の表示は四捨五入しています。実請求の端数処理とは差が生じます。</p></section>
+<section class="panel"><h2>保存・引き継ぎ</h2><p>入力中の内容も端末に自動保存します。Macとの接続は不要です。端末変更やブラウザのデータ消去前にバックアップを保存してください。</p>
+<div class="actions"><button id="backup" class="button secondary" type="button">JSONバックアップ</button><label class="button secondary file-button">バックアップ復元<input id="restore-file" type="file" accept=".json,application/json"></label></div>
+<p class="hint">復元前に件数を確認できます。現在の内容も自動でダウンロードしてから置き換えます。別タブでの編集競合もバックアップに含めます。</p>
+<div class="divider"></div><h3>自動調査結果を追加</h3><p class="hint">既存GitHub版のresults.jsonを読み込めます。同じメーカー・品番は上書きしません。実成約数と観測推定は別に保存します。</p>
+<div class="actions"><button id="import-latest" class="button secondary" type="button">GitHub版の最新結果</button><label class="button secondary file-button">JSONを選ぶ<input id="import-file" type="file" accept=".json,application/json"></label></div>
+<p class="hint">APIキーはこの画面に入力しません。自動調査の接続設定は「自動調査へ」から確認できます。</p></section>
+</section>
+</main>
+<p id="toast" role="status" hidden></p>
+<nav class="bottom-nav" aria-label="メインメニュー"><button type="button" data-view="research" aria-current="page">調べる</button><button type="button" data-view="list">調査リスト</button><button type="button" data-view="settings">設定・保存</button></nav>
+</body></html>

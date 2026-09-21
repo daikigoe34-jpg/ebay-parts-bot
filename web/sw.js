@@ -1,10 +1,10 @@
 "use strict";
 importScripts("./sw_core.js");
 
-const CACHE_NAME = "part-scout-shell-v12";
+const CACHE_NAME = "part-scout-shell-v13";
 const DATA_CACHE = "part-scout-data-v1";
 const DATA_PATHS = ["data/results.json", "data/setup_status.json"];
-const SHELL = ["./", "./index.html", "./styles.css", "./persistence.js", "./workspace-sync.js", "./research-queue.js", "./shipping.js", "./app.js", "./shipping-calculator.html", "./shipping-calculator.js", "./part-parcel.js", "./part-lookup-ui.js", "./sw_core.js", "./manifest.webmanifest", "./icons/icon-512.png"];
+const SHELL = ["./research.html", "./research.css", "./research-core.js", "./research-ui.js", "./", "./index.html", "./styles.css", "./persistence.js", "./workspace-sync.js", "./research-queue.js", "./shipping.js", "./app.js", "./shipping-calculator.html", "./shipping-calculator.js", "./part-parcel.js", "./part-lookup-ui.js", "./sw_core.js", "./manifest.webmanifest", "./icons/icon-512.png"];
 const { stableCacheUrl, isDynamicDataUrl } = self.PartScoutSWCore;
 
 self.addEventListener("install", event => {
