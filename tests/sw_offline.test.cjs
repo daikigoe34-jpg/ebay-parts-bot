@@ -4,6 +4,19 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
 
+test("the real worker imports its core and installs without global name collisions", async () => {
+  const handlers={}, cached=[];
+  let context;
+  context=vm.createContext({URL,Response,Headers,AbortController,setTimeout,clearTimeout,
+    importScripts: path=>vm.runInContext(fs.readFileSync(require.resolve('../web/'+path.replace(/^\.\//,'')),'utf8'),context),
+    caches:{open:async()=>({addAll:async paths=>cached.push(...paths)})},
+    self:{addEventListener:(name,fn)=>{handlers[name]=fn;},skipWaiting(){},clients:{claim:async()=>{}}},
+  });
+  vm.runInContext(fs.readFileSync(require.resolve('../web/sw.js'),'utf8'),context);
+  let installed;handlers.install({waitUntil:promise=>{installed=promise;}});await installed;
+  assert.ok(cached.includes('./research.html'));assert.ok(cached.includes('./research-ui.js'));
+});
+
 function worker(fetcher, failPut = false) {
   const handlers = {}, deleted = [];
   const cached = new Response('{"products":[]}', { headers: { "Content-Type": "application/json" } });

@@ -1,7 +1,7 @@
 "use strict";
 importScripts("./sw_core.js");
 
-const CACHE_NAME = "part-scout-shell-v14";
+const CACHE_NAME = "part-scout-shell-v15";
 const DATA_CACHE = "part-scout-data-v1";
 const DATA_PATHS = ["data/results.json", "data/setup_status.json"];
 const SHELL = ["./research.html", "./research.css", "./research-core.js", "./research-ui.js", "./", "./index.html", "./styles.css", "./persistence.js", "./workspace-sync.js", "./research-queue.js", "./shipping.js", "./app.js", "./shipping-calculator.html", "./shipping-calculator.js", "./part-parcel.js", "./part-lookup-ui.js", "./sw_core.js", "./manifest.webmanifest", "./icons/icon-512.png"];
