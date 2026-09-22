@@ -1,4 +1,5 @@
 "use strict";
+(function () {
 
 const DYNAMIC_DATA_PATHS = ["/data/results.json", "/data/setup_status.json"];
 
@@ -25,3 +26,4 @@ if (typeof self !== "undefined") {
 if (typeof module !== "undefined" && module.exports) {
   module.exports = { stableCacheUrl, isDynamicDataUrl };
 }
+})();

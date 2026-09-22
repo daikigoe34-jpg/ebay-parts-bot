@@ -1,8 +1,8 @@
 {
   "name": "Part Scout Mobile",
   "short_name": "Part Scout",
-  "description": "eBay Production Browse APIで自動車部品を品番単位に追跡し、仕入れと利益を順番に判定するPWA",
-  "start_url": "./index.html",
+  "description": "品番検索・仕入比較・配送見積・利益計算をiPhoneで記録するリサーチ支援アプリ",
+  "start_url": "./research.html",
   "scope": "./",
   "display": "standalone",
   "background_color": "#f1f5f9",
@@ -14,6 +14,16 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "リサーチ支援",
+      "url": "./research.html"
+    },
+    {
+      "name": "自動調査",
+      "url": "./index.html"
     }
   ]
 }
