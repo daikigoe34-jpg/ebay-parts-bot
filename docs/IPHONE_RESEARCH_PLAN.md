@@ -10,8 +10,10 @@ Tasks:
 - [x] Implement mobile UI, immediate draft persistence, research list, import/export, source/date controls and missing-data indications.
 - [x] Wire PWA entry/cache and existing navigation; document the workflow and limitations.
 - [x] Run JS/Python regression suites and DOM integration checks for draft reload, saving, restore, quote comparison and unknown costs.
-- [ ] Browser/iPhone checks for 390px layout and offline access: blocked by browser download timeout and cloud browser localhost restrictions; documented in IPHONE_RESEARCH_TEST_REPORT.md.
-- [x] Commit and save a reviewable feature branch/PR to the existing GitHub repository. PR: https://github.com/daikigoe34-jpg/ebay-parts-bot/pull/10 (draft; iPhone browser checks outstanding).
+- [x] Chromium/WebKit checks for 320–1280px layout, backup/restore, conflicts and origin-unavailable cached startup: 12 passed. WebKit offline-emulator limitation and physical iPhone scope are documented in IPHONE_RESEARCH_TEST_REPORT.md.
+- [x] Commit and save a reviewable feature branch/PR to the existing GitHub repository. PR: https://github.com/daikigoe34-jpg/ebay-parts-bot/pull/10.
+- [ ] Enable GitHub Pages and verify the published URL: requires repository-owner GitHub sign-in; connector has no Pages setting operation.
+- [ ] Physical iPhone home-screen installation and airplane-mode check after publication.
 
 Review focus: zero versus unknown; all-in quote versus transport-only quote; fee calculation and price changes against dated quotes; untrusted backup/CSV values; storage failure and concurrent tabs.
 

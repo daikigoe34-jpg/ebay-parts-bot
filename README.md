@@ -4,7 +4,7 @@ Macのローカルプログラムとは独立して、GitHub Pagesで使うiPhon
 
 ## リサーチ支援の使い方
 
-1. この変更を`main`へマージしてGitHub Pagesへ公開します。Pagesが未設定なら、リポジトリの`Settings → Pages → Source: GitHub Actions`を選び、既存の「GitHub Pages公開」ワークフローを実行します。
+1. リポジトリの`Settings → Pages → Source: GitHub Actions`を選び、既存の「GitHub Pages公開」ワークフローを実行します。GitHubへのコード保存だけでは公開されません。
 2. Pagesの公開URLの末尾に`/research.html`を付けてiPhoneのSafariで開き、共有メニューからホーム画面に追加します。トップの従来画面にも「リサーチ支援を開く」リンクがあります。
 3. 「設定・保存」で為替・手数料を入力します。初期料率は従来アプリの参考値なので、ご自身の契約・カテゴリに合わせて確認してください。
 4. 「調べる」でメーカーと品番を入力し、eBay販売実績・出品中・モノタロウ・楽天・Amazonの検索を開きます。日本出品→米国購入、新品・単品を対象とし、販売実績の条件・期間を検索先で確認します。
@@ -22,7 +22,7 @@ Macのローカルプログラムとは独立して、GitHub Pagesで使うiPhon
 - JSONは記録・入力途中・設定を保存／復元します。CSVは保存済み記録の一覧です。別タブの競合時は上書きを止めて復旧用コピーを残します。ブラウザの保存容量不足時は画面に表示します。
 - 初回オンライン読み込み後はPWAの画面と端末内データをオフライン利用できます。外部サイトの検索と最新結果の取得には通信が必要です。iPhone実機でのインストール・オフライン動作は今回未検証です。
 
-開発者向け：`npm ci --ignore-scripts`、`npm test`、`python -m pytest -q`。ローカル起動は`python -m http.server 8765 --directory web`、画面は`http://localhost:8765/research.html`です。[今回の検証記録](docs/IPHONE_RESEARCH_TEST_REPORT.md)を参照してください。
+開発者向け：`npm ci --ignore-scripts`、`npm test`、`python -m pytest -q`。実ブラウザ試験は`npx playwright install --with-deps chromium webkit`の後に`npm run test:browser`で実行します。ローカル起動は`python -m http.server 8765 --directory web`、画面は`http://localhost:8765/research.html`です。[今回の検証記録](docs/IPHONE_RESEARCH_TEST_REPORT.md)を参照してください。
 
 ---
 
