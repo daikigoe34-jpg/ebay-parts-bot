@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "app_version": "0.4.1",
-  "checked_at": "2026-10-18T23:14:28.561368Z",
+  "checked_at": "2026-10-20T00:22:00.947067Z",
   "ready": false,
   "status": "missing_secrets",
   "mode": "production_browse_only",
